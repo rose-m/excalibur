@@ -1,8 +1,8 @@
 # Excalibur
 
-A persistent Excalidraw service for humans and agents. The first slice is a
-local-only React editor with SQLite persistence. Authentication, live collaboration,
-and remote MCP are planned, not implemented.
+A persistent Excalidraw service for humans and agents. The local-only React editor
+supports live canvas collaboration with SQLite persistence. Authentication and
+remote MCP are planned, not implemented.
 
 See the [high-level design](docs/high-level-design.md) for scope, architecture, permissions, and deployment direction.
 
@@ -17,8 +17,9 @@ pnpm install
 pnpm dev
 ```
 
-Open **http://127.0.0.1:5173**. Vite proxies API calls to the server on port 3000.
-Create a canvas, draw, wait for “Saved”, and reopen its `/canvases/:id` URL.
+Open **http://127.0.0.1:5173**. Vite proxies HTTP and WebSocket calls to port 3000.
+Create a canvas and open its `/canvases/:id` URL in two tabs to edit together.
+Wait for “Live · Saved” before closing.
 Scenes and image bytes survive server restarts in `data/excalibur.sqlite`.
 
 **There is no authentication. Do not expose either server publicly.** Every local
@@ -54,20 +55,30 @@ warning.
   viewport, selection, and other local state are not persisted.
 - Images are stored as separate SQLite blobs and returned only through the owning
   canvas read. PNG, JPEG, GIF and WebP are supported; SVG imports are not yet
-  supported. Limits: 5 MiB per image, 15 MiB total images, 24 MiB request payload,
-  and 20,000 elements.
-- Autosave is debounced and serialized. The scene, assets and increasing revision
+  supported. Limits: 5 MiB per image, 15 MiB total images, 24 MiB request/message
+  and scene size, and 20,000 elements.
+- Incremental element/file updates are debounced and serialized. The scene, assets and increasing revision
   commit atomically before success is returned. Errors remain visible and unsaved
   edits trigger a navigation warning.
-- This slice submits **full snapshots with revision preconditions**, not a
-  collaboration protocol. Stale saves return `409` instead of overwriting another
-  tab. Export any unsaved work before reloading after a conflict. Incremental
-  mutations and reconciliation are the next collaboration prototype.
+- The server reconciles element versions and nonces using the pinned Excalidraw
+  semantics, preserves tombstones, and repairs fractional ordering. This resolves
+  whole-element conflicts, not every property or concurrent text edit.
+- Clean reconnects reload an authoritative snapshot. If a connection is lost
+  with local or unacknowledged edits, editing stops: export unsaved work, then
+  explicitly reload. Offline edits are never silently replayed.
 
 HTTP endpoints: `GET/POST /api/canvases`, `GET/PUT /api/canvases/:id`, and
-`GET /health/live` / `GET /health/ready`. Create accepts `{ "title": "My canvas" }`;
-save accepts `{ "expectedRevision": 0, "scene": { ... } }`. Identity and ownership
-fields cannot be supplied in either request.
+`POST /api/canvases/:id/mutations`, plus `GET /health/live` / `GET /health/ready`.
+Create accepts `{ "title": "My canvas" }`. Mutations accept changed `elements`,
+optional `files` / `sharedSettings`, and an optional `expectedRevision` for
+read–modify–write clients. Revision conflicts return `409`.
+
+The compatibility PUT accepts `{ "expectedRevision": 0, "scene": { ... } }` but
+now reconciles elements rather than replacing the entire scene. Omitting an
+element does not delete it; send a versioned `isDeleted` tombstone.
+
+WebSockets join `/api/canvases/:id/live`. Identity and ownership fields are never
+accepted from client payloads.
 
 ## Structure
 
@@ -76,13 +87,14 @@ fields cannot be supplied in either request.
   - `auth/`: operation context and fixed development identity.
   - `canvas/`: shared canvas service and access checks.
   - `http/`: Hono API routes, middleware, and built-web-asset serving.
+  - `live/`: canvas-scoped WebSocket subscriptions and heartbeat/backpressure handling.
   - `persistence/`: storage interfaces and SQLite adapter.
   - `render/`: headless rendering.
 - `src/shared/`: transport schemas and shared types.
 - `migrations/`: versioned database migrations.
-- `tests/`: service, persistence, HTTP, and scene helper tests.
+- `tests/`: service, persistence, HTTP, WebSocket, and client scene helper tests.
 
-`mcp/`, `live/`, and `render/` remain placeholders. React 18 is used to match the
+`mcp/` and `render/` remain placeholders. React 18 is used to match the
 pinned Excalidraw component's transitive peer dependencies. This is a single
 package, not a pnpm workspace.
 

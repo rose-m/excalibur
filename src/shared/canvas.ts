@@ -11,6 +11,7 @@ const elementSchema = z.object({
   version: z.number().int().nonnegative(),
   versionNonce: z.number().int(),
   isDeleted: z.boolean(),
+  index: z.string().max(200).nullable().optional(),
 }).passthrough();
 
 const fileSchema = z.strictObject({
@@ -30,6 +31,21 @@ export const saveSceneSchema = z.strictObject({
   expectedRevision: z.number().int().nonnegative(),
   scene: sceneSchema,
 });
+
+export const mutationSchema = z.strictObject({
+  elements: sceneSchema.shape.elements,
+  files: sceneSchema.shape.files.default({}),
+  sharedSettings: sceneSchema.shape.sharedSettings.optional(),
+  expectedRevision: z.number().int().nonnegative().optional(),
+});
+
+export type Mutation = z.infer<typeof mutationSchema>;
+export type SceneUpdate = {
+  revision: number;
+  elements: Scene["elements"];
+  files: Scene["files"];
+  sharedSettings: Scene["sharedSettings"];
+};
 
 export type Scene = z.infer<typeof sceneSchema>;
 export type SaveScene = z.infer<typeof saveSceneSchema>;

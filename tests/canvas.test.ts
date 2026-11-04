@@ -17,7 +17,7 @@ function scene(): Scene {
   return {
     elements: [
       { id: "image", type: "image", version: 2, versionNonce: 42, isDeleted: false, fileId: "asset", index: "a0", boundElements: [{ id: "arrow", type: "arrow" }] },
-      { id: "deleted", type: "rectangle", version: 3, versionNonce: 5, isDeleted: true },
+      { id: "deleted", type: "rectangle", version: 3, versionNonce: 5, isDeleted: true, index: "a1" },
     ],
     sharedSettings: { viewBackgroundColor: "#fafafa" },
     files: { asset: { id: "asset", mimeType: "image/png", dataURL: `data:image/png;base64,${png}`, created: 123 } },
@@ -72,6 +72,24 @@ test("ownership and organization checks apply to listing, reads and saves", () =
     assert.equal(service.list(member).length, 1);
     assert.throws(() => service.get(otherOrg, "org-visible"), status(404));
     assert.throws(() => service.create(owner, { title: "Injected", organizationId: "org-b" }));
+  } finally { repository.close(); }
+});
+
+test("SQLite rolls scene, revision and assets back together after a mid-commit failure", () => {
+  const repository = new SqliteCanvasRepository(":memory:");
+  try {
+    const service = new CanvasService(repository);
+    const canvas = service.create(owner, { title: "Atomic commit" });
+    service.save(owner, canvas.id, { expectedRevision: 0, scene: scene() });
+    const invalid = scene();
+    invalid.elements = [];
+    invalid.files.asset!.dataURL = "no base64 separator";
+    // Exercise the adapter directly: this throws after UPDATE and asset DELETE,
+    // proving its transaction rolls back even when the application is bypassed.
+    assert.throws(() => repository.commit(canvas.id, { expectedRevision: 1, scene: invalid }, new Date().toISOString()));
+    const restored = service.get(owner, canvas.id);
+    assert.equal(restored.revision, 1);
+    assert.deepEqual(restored.scene, scene());
   } finally { repository.close(); }
 });
 

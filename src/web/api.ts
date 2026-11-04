@@ -1,4 +1,4 @@
-import type { CanvasDocument, CanvasMetadata, SaveScene } from "../shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata } from "../shared/canvas.js";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -17,7 +17,4 @@ export const api = {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
   }),
   get: (id: string) => request<CanvasDocument>(`/api/canvases/${id}`),
-  save: (id: string, input: SaveScene) => request<CanvasMetadata>(`/api/canvases/${id}`, {
-    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
-  }),
 };

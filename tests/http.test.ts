@@ -36,7 +36,10 @@ test("HTTP lifecycle, conflicts, validation and local-only safeguards", async ()
     const canvas = await created.json() as CanvasDocument;
     assert.equal(created.headers.get("cache-control"), "no-store");
     assert.equal((await fetch(`${base}/api/canvases/${canvas.id}`)).status, 200);
-    const save = { ...post({ expectedRevision: 0, scene: canvas.scene }), method: "PUT" };
+    const save = { ...post({ expectedRevision: 0, scene: {
+      ...canvas.scene,
+      elements: [{ id: "http-element", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false, index: "a0" }],
+    } }), method: "PUT" };
     assert.equal((await fetch(`${base}/api/canvases/${canvas.id}`, save)).status, 200);
     assert.equal((await fetch(`${base}/api/canvases/${canvas.id}`, save)).status, 409);
     assert.equal((await fetch(`${base}/api/canvases`, post({ title: " " }))).status, 400);

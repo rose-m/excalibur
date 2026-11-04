@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sceneSignature } from "../src/web/scene-state.js";
+import { signature } from "../src/shared/signature.js";
 import type { Scene } from "../src/shared/canvas.js";
 
 test("document signatures ignore field order but preserve element order and native mutations", () => {
@@ -13,12 +13,12 @@ test("document signatures ignore field order but preserve element order and nati
   };
   const reordered = JSON.parse(JSON.stringify(first)) as Scene;
   reordered.elements = reordered.elements.map((element) => Object.fromEntries(Object.entries(element).reverse()) as Scene["elements"][number]);
-  assert.equal(sceneSignature(first), sceneSignature(reordered));
+  assert.equal(signature(first), signature(reordered));
   reordered.elements.reverse();
-  assert.notEqual(sceneSignature(first), sceneSignature(reordered));
-  const signature = sceneSignature(first);
-  const snapshot = JSON.parse(signature) as Scene;
+  assert.notEqual(signature(first), signature(reordered));
+  const initialSignature = signature(first);
+  const snapshot = JSON.parse(initialSignature) as Scene;
   first.elements[0]!.width = 200;
-  assert.notEqual(sceneSignature(first), signature);
+  assert.notEqual(signature(first), initialSignature);
   assert.equal(snapshot.elements[0]!.width, 100);
 });
