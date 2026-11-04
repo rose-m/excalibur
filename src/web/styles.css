@@ -1,0 +1,35 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #25243c; background: #f8f8fc; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: #5148b8; }
+button, input { font: inherit; }
+button { background: #5148b8; color: white; border: 1px solid transparent; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+button:hover { background: #443ca0; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.secondary { color: #5148b8; background: white; border-color: #d9d7eb; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #a5a0ef; outline-offset: 3px; }
+.canvas-list { max-width: 1040px; margin: 0 auto; padding: 64px 24px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #716b9f; }
+h1 { font-size: 36px; letter-spacing: -.04em; margin-bottom: 12px; }
+.muted, .empty { color: #706e83; }
+.create-form { margin: 40px 0; }
+.create-form label { display: block; font-weight: 600; margin-bottom: 10px; }
+.create-row { display: flex; gap: 12px; }
+input { flex: 1; min-width: 0; border: 1px solid #d9d7eb; border-radius: 8px; padding: 12px; background: white; }
+.canvas-grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.canvas-card { display: block; height: 100%; background: white; border: 1px solid #e3e1ef; border-radius: 12px; padding: 24px; text-decoration: none; color: inherit; }
+.canvas-card:hover { border-color: #8c83db; }
+.canvas-card h2 { font-size: 20px; margin: 0 0 20px; overflow-wrap: anywhere; }
+.canvas-card p { font-size: 13px; margin: 0; }
+.local-notice { margin-top: 48px; font-size: 13px; color: #79768c; }
+.error, .save-error { color: #9b2727; }
+.editor-page { height: 100dvh; display: flex; flex-direction: column; background: white; }
+.editor-header { display: flex; align-items: center; gap: 20px; padding: 12px 20px; border-bottom: 1px solid #e3e1ef; }
+.editor-header a { white-space: nowrap; font-size: 14px; }
+.editor-header h1 { flex: 1; font-size: 18px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.save-status { color: #706e83; font-size: 13px; white-space: nowrap; }
+.save-error { padding: 10px 20px; font-size: 13px; background: #fff0f0; }
+.save-error button { margin-left: 8px; font-size: 12px; padding: 6px; }
+.editor-surface { flex: 1; min-height: 0; }
+.editor-footer { padding: 6px 16px; border-top: 1px solid #e3e1ef; font-size: 11px; color: #79768c; }
+@media (max-width: 600px) { .canvas-list { padding: 32px 16px; } .create-row { flex-direction: column; } .editor-header { gap: 10px; padding: 10px; } .editor-header h1 { font-size: 14px; } .editor-header button { padding: 8px; } }

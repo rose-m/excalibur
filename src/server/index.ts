@@ -1,20 +1,18 @@
 import { createServer } from "node:http";
 import { config } from "./config.js";
+import { CanvasService } from "./canvas/service.js";
+import { createHandler } from "./http/app.js";
+import { SqliteCanvasRepository } from "./persistence/sqlite.js";
 
-// Bootstrap only: application routes and integrations are not implemented yet.
-const server = createServer((request, response) => {
-  if (request.method === "GET" && request.url === "/health/live") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ status: "ok" }));
-    return;
-  }
-
-  response.writeHead(404, { "content-type": "application/json" });
-  response.end(JSON.stringify({ error: "Not found" }));
-});
+const repository = new SqliteCanvasRepository(config.databasePath);
+const service = new CanvasService(repository);
+const handler = createHandler(service, config.webDirectory, config.port);
+const server = createServer((request, response) => { void handler(request, response); });
+server.requestTimeout = 30_000;
 
 server.listen(config.port, config.host, () => {
   console.log(`Excalibur listening on http://${config.host}:${config.port}`);
+  console.warn("Authentication is disabled. Local development only; do not expose this service publicly.");
 });
 
 function shutdown() {
@@ -26,6 +24,7 @@ function shutdown() {
 
   server.close((error) => {
     clearTimeout(timeout);
+    repository.close();
     if (error) {
       console.error(error);
       process.exitCode = 1;

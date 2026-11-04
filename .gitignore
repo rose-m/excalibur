@@ -5,5 +5,6 @@ coverage/
 .env.*
 !.env.example
 data/
+public/excalidraw-assets/
 *.log
 .DS_Store
