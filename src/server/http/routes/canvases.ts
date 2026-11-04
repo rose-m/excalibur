@@ -1,33 +1,21 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { OperationContext } from "../../auth/context.js";
-import { ServiceError } from "../../canvas/errors.js";
+import { Hono } from "hono";
 import type { CanvasService } from "../../canvas/service.js";
-import { readJson, sendJson } from "../json.js";
+import { readJson } from "../json.js";
+import type { HttpEnv } from "../types.js";
 
 export function createCanvasRoutes(service: CanvasService) {
-  return async (request: IncomingMessage, response: ServerResponse, url: URL, context: OperationContext): Promise<boolean> => {
-    if (url.pathname === "/api/canvases") {
-      if (request.method === "GET") {
-        sendJson(response, 200, service.list(context));
-      } else if (request.method === "POST") {
-        sendJson(response, 201, service.create(context, await readJson(request)));
-      } else {
-        throw new ServiceError(405, "Method not allowed");
-      }
-      return true;
-    }
+  const routes = new Hono<HttpEnv>();
 
-    const match = /^\/api\/canvases\/([a-f0-9-]{36})$/.exec(url.pathname);
-    if (!match) return false;
+  routes.get("/", (c) => c.json(service.list(c.get("context"))));
+  routes.post("/", async (c) =>
+    c.json(service.create(c.get("context"), await readJson(c.req)), 201));
 
-    const id = match[1]!;
-    if (request.method === "GET") {
-      sendJson(response, 200, service.get(context, id));
-    } else if (request.method === "PUT") {
-      sendJson(response, 200, service.save(context, id, await readJson(request)));
-    } else {
-      throw new ServiceError(405, "Method not allowed");
-    }
-    return true;
-  };
+  routes.get("/:id", (c) =>
+    c.json(service.get(c.get("context"), c.req.param("id"))));
+  routes.put("/:id", async (c) =>
+    c.json(service.save(c.get("context"), c.req.param("id"), await readJson(c.req))));
+
+  routes.all("/", (c) => c.json({ error: "Method not allowed" }, 405));
+  routes.all("/:id", (c) => c.json({ error: "Method not allowed" }, 405));
+  return routes;
 }

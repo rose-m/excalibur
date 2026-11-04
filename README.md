@@ -75,7 +75,7 @@ fields cannot be supplied in either request.
 - `src/server/`: application startup and configuration.
   - `auth/`: operation context and fixed development identity.
   - `canvas/`: shared canvas service and access checks.
-  - `http/`: API and built-web-asset serving.
+  - `http/`: Hono API routes, middleware, and built-web-asset serving.
   - `persistence/`: storage interfaces and SQLite adapter.
   - `render/`: headless rendering.
 - `src/shared/`: transport schemas and shared types.
