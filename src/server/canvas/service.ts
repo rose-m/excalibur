@@ -121,9 +121,12 @@ export class CanvasService {
     let listeners = this.listeners.get(id);
     if (!listeners) { listeners = new Set(); this.listeners.set(id, listeners); }
     listeners.add(listener);
+    let closed = false;
     return () => {
+      if (closed) return;
+      closed = true;
       listeners.delete(listener);
-      if (!listeners.size) this.listeners.delete(id);
+      if (!listeners.size && this.listeners.get(id) === listeners) this.listeners.delete(id);
     };
   }
 }

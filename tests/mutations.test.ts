@@ -93,3 +93,25 @@ test("failed transactions never publish or advance revisions", () => {
     assert.equal(service.get(owner, canvas.id).revision, 0);
   } finally { repository.close(); }
 });
+
+test("repeated unsubscribe cannot remove a replacement canvas room", () => {
+  const repository = new SqliteCanvasRepository(":memory:");
+  const service = new CanvasService(repository);
+  try {
+    const canvas = service.create(owner, { title: "Room replacement" });
+    const oldCleanup = service.subscribe(owner, canvas.id, () => assert.fail("Old subscriber was not removed"));
+    oldCleanup();
+    let received = 0;
+    const cleanup = service.subscribe(owner, canvas.id, () => { received++; });
+    oldCleanup();
+    service.mutate(owner, canvas.id, { elements: [element("a", "a0")] });
+    assert.equal(received, 1);
+    oldCleanup();
+    service.mutate(owner, canvas.id, { elements: [element("b", "a1")] });
+    assert.equal(received, 2);
+    cleanup();
+    cleanup();
+    service.mutate(owner, canvas.id, { elements: [element("c", "a2")] });
+    assert.equal(received, 2);
+  } finally { repository.close(); }
+});

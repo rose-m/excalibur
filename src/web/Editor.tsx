@@ -4,12 +4,15 @@ import type { ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excal
 import "@excalidraw/excalidraw/index.css";
 import type { CanvasDocument } from "../shared/canvas.js";
 import { LiveCanvas } from "./live-canvas.js";
-import type { LiveStatus } from "./live-canvas.js";
+import type { LiveRecovery, LiveStatus } from "./live-canvas.js";
+import { createLiveEditor } from "./live-editor.js";
 
 export default function Editor({ canvas }: { canvas: CanvasDocument }) {
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ ready: false, message: "Connecting…", error: "" });
   const live = useRef<LiveCanvas | null>(null);
+  // Keep recovery in a ref so effect replay/Fast Refresh cannot discard it.
+  const recovery = useRef<LiveRecovery>();
   const initialData = useMemo(() => ({
     elements: canvas.scene.elements,
     appState: { ...canvas.scene.sharedSettings, scrollToContent: true },
@@ -19,7 +22,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
 
   useEffect(() => {
     if (!editor) return;
-    const client = new LiveCanvas(canvas, editor, setStatus);
+    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current });
     live.current = client;
     client.connect();
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -28,7 +31,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
     window.addEventListener("beforeunload", beforeUnload);
     return () => {
       window.removeEventListener("beforeunload", beforeUnload);
-      client.dispose();
+      recovery.current = client.dispose();
       live.current = null;
     };
   }, [canvas, editor]);

@@ -1,27 +1,22 @@
-import { CaptureUpdateAction, isInvisiblySmallElement, reconcileElements, restoreElements } from "@excalidraw/excalidraw";
-import type { BinaryFiles, ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import type { CanvasDocument, Scene, SceneUpdate } from "../shared/canvas.js";
 import type { ServerMessage } from "../shared/live.js";
-import { signature } from "../shared/signature.js";
-import { applyUpdate, pendingMutation } from "./live-state.js";
+import { applyUpdate, pendingMutation, SharedSettingsTracker } from "./live-state.js";
+import type { LiveEditor } from "./live-state.js";
 
 export type LiveStatus = { ready: boolean; message: string; error: string };
 
-function normalize(scene: Scene): Scene {
-  const restored = restoreElements(scene.elements as unknown as Parameters<typeof restoreElements>[0], null,
-    { refreshDimensions: false, repairBindings: false });
-  const byId = new Map(restored.map((element) => [element.id, element]));
-  return {
-    ...scene,
-    // Restoration drops tiny in-progress elements. Keep them in the baseline
-    // so an acknowledgment cannot cause an endless resend loop.
-    elements: scene.elements.map((element) => byId.get(element.id) ?? element) as Scene["elements"],
-  };
-}
+export type LiveRecovery = { canvasId: string; scene: Scene; unsaved: boolean; error: string };
+export type LiveSocket = Pick<WebSocket, "readyState" | "send" | "close" | "onmessage" | "onclose" | "onopen">;
+type LiveOptions = {
+  baseUrl?: string;
+  createSocket?: (url: string) => LiveSocket;
+  recovery?: LiveRecovery | undefined;
+};
 
 export class LiveCanvas {
-  private socket: WebSocket | undefined;
+  private socket: LiveSocket | undefined;
   private known: Scene;
+  private settings: SharedSettingsTracker;
   private revision: number;
   private ready = false;
   private dirty = false;
@@ -33,26 +28,37 @@ export class LiveCanvas {
   private reconnect: ReturnType<typeof setTimeout> | undefined;
   private reconnectDelay = 400;
   private reconnectAttempts = 0;
+  private failure = "";
 
-  constructor(private canvas: CanvasDocument, private editor: ExcalidrawImperativeAPI,
-    private status: (status: LiveStatus) => void) {
-    this.known = normalize(canvas.scene);
+  constructor(private canvas: CanvasDocument, private editor: LiveEditor,
+    private status: (status: LiveStatus) => void, private options: LiveOptions = {}) {
+    this.known = editor.normalize(canvas.scene);
+    this.settings = new SharedSettingsTracker(editor.read().sharedSettings);
     this.revision = canvas.revision;
   }
 
   connect() {
     if (this.stopped || this.blocked) return;
+    const recovery = this.options.recovery;
+    if (recovery?.canvasId === this.canvas.id && (recovery.unsaved || recovery.error)) {
+      this.dirty = recovery.unsaved;
+      this.settings.retain(recovery.scene.sharedSettings);
+      this.render(recovery.scene, true);
+      this.fail(recovery.error || "Synchronization restarted with unconfirmed edits. Export your drawing before reloading; edits will not be replaced automatically.");
+      return;
+    }
     this.status({ ready: false, message: "Connecting…", error: "" });
-    const url = new URL(`/api/canvases/${this.canvas.id}/live`, window.location.href);
+    const url = new URL(`/api/canvases/${this.canvas.id}/live`, this.options.baseUrl ?? window.location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(url);
+    const socket = this.options.createSocket ? this.options.createSocket(url.href) : new WebSocket(url);
     this.socket = socket;
     socket.onmessage = (event) => {
       if (this.stopped || this.blocked || this.socket !== socket) return;
       try {
         const message = JSON.parse(event.data as string) as ServerMessage;
         if (message.type === "snapshot") {
-          this.known = normalize(message.canvas.scene);
+          this.known = this.editor.normalize(message.canvas.scene);
+          this.settings = new SharedSettingsTracker(this.editor.read().sharedSettings);
           this.revision = message.canvas.revision;
           this.render(this.known, true);
           this.ready = true;
@@ -67,6 +73,7 @@ export class LiveCanvas {
           if (message.requestId === this.inFlight) {
             clearTimeout(this.acknowledgment);
             this.inFlight = undefined;
+            this.settings.settle(this.known.sharedSettings);
             this.schedule();
           }
         } else if (message.type === "error") {
@@ -97,30 +104,17 @@ export class LiveCanvas {
   }
 
   private scene(): Scene {
-    const files = this.editor.getFiles();
     return {
-      elements: this.editor.getSceneElementsIncludingDeleted() as unknown as Scene["elements"],
-      sharedSettings: { viewBackgroundColor: this.editor.getAppState().viewBackgroundColor },
-      files: Object.fromEntries(Object.entries(files).map(([id, file]) => [id, {
-        id: file.id, mimeType: file.mimeType, dataURL: file.dataURL, created: file.created,
-      }])) as Scene["files"],
+      ...this.editor.read(),
+      // Reading React state is not evidence of local intent: it may still be
+      // waiting to apply a remote render. Only changed() records local settings.
+      sharedSettings: this.settings.value(this.known.sharedSettings),
     };
   }
 
   private render(scene: Scene, replace: boolean) {
-    // Excalidraw mutates native element objects in place. Never give it our
-    // authoritative baseline objects, or local edits would mutate the baseline.
-    const remote = structuredClone(scene);
-    this.editor.addFiles(Object.values(remote.files) as unknown as BinaryFiles[string][]);
-    const elements = replace ? remote.elements : reconcileElements(
-      this.editor.getSceneElementsIncludingDeleted() as Parameters<typeof reconcileElements>[0],
-      remote.elements as unknown as Parameters<typeof reconcileElements>[1], this.editor.getAppState());
-    this.editor.updateScene({
-      elements: elements as Parameters<ExcalidrawImperativeAPI["updateScene"]>[0]["elements"],
-      appState: scene.sharedSettings,
-      // Remote updates must not become local undo steps.
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
+    this.settings.requested(scene.sharedSettings);
+    this.editor.render(scene, replace);
   }
 
   private receive(update: SceneUpdate) {
@@ -129,15 +123,17 @@ export class LiveCanvas {
       this.fail("Missed a canvas revision. Export unsaved work, then reload the authoritative scene.");
       return;
     }
-    const current = this.scene();
-    const localBackground = signature(current.sharedSettings) !== signature(this.known.sharedSettings);
-    this.known = normalize(applyUpdate(this.known, update));
+    this.known = this.editor.normalize(applyUpdate(this.known, update));
     this.revision = update.revision;
-    this.render({ ...this.known, sharedSettings: localBackground ? current.sharedSettings : this.known.sharedSettings }, false);
+    if (!this.inFlight) this.settings.settle(this.known.sharedSettings);
+    this.render({ ...this.known, sharedSettings: this.settings.value(this.known.sharedSettings) }, false);
   }
 
   changed() {
-    if (!this.ready || this.blocked || this.stopped) return;
+    if (this.blocked || this.stopped) return;
+    this.settings.changed(this.editor.read().sharedSettings, this.ready);
+    if (!this.ready) return;
+    if (!this.inFlight) this.settings.settle(this.known.sharedSettings);
     const wasDirty = this.dirty;
     this.dirty = pendingMutation(this.known, this.scene()) !== null;
     if (this.dirty) {
@@ -166,12 +162,12 @@ export class LiveCanvas {
     }
     const knownIds = new Set(this.known.elements.map((element) => element.id));
     mutation.elements = mutation.elements.filter((element) => element.isDeleted || knownIds.has(element.id)
-      || !isInvisiblySmallElement(element as unknown as Parameters<typeof isInvisiblySmallElement>[0]));
+      || !this.editor.isInvisiblySmall(element));
     if (!mutation.elements.length && !Object.keys(mutation.files).length && !mutation.sharedSettings) return;
     // An image can emit an element update before its asynchronous file load.
     if (mutation.elements.some((element) => element.type === "image" && !element.isDeleted
       && typeof element.fileId === "string" && !Object.hasOwn(this.scene().files, element.fileId))) return;
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    if (this.socket?.readyState !== 1) return;
     this.inFlight = crypto.randomUUID();
     this.status({ ready: true, message: "Live · Saving…", error: "" });
     try {
@@ -186,6 +182,8 @@ export class LiveCanvas {
   }
 
   private fail(message: string) {
+    if (this.ready && !this.blocked) this.hasUnsavedChanges();
+    this.failure = message;
     this.blocked = true;
     this.ready = false;
     clearTimeout(this.timer);
@@ -195,16 +193,22 @@ export class LiveCanvas {
     this.status({ ready: false, message: "Not synchronized", error: message });
   }
 
-  dispose() {
+  dispose(): LiveRecovery {
+    const recovery: LiveRecovery = {
+      canvasId: this.canvas.id, scene: structuredClone(this.scene()),
+      unsaved: this.hasUnsavedChanges(), error: this.failure,
+    };
     this.stopped = true;
     clearTimeout(this.timer);
     clearTimeout(this.acknowledgment);
     clearTimeout(this.reconnect);
     const socket = this.socket;
-    if (!socket) return;
-    socket.onmessage = null;
-    socket.onclose = null;
-    if (socket.readyState === WebSocket.CONNECTING) socket.onopen = () => socket.close();
-    else socket.close();
+    if (socket) {
+      socket.onmessage = null;
+      socket.onclose = null;
+      if (socket.readyState === 0) socket.onopen = () => socket.close();
+      else socket.close();
+    }
+    return recovery;
   }
 }
