@@ -1,8 +1,9 @@
 # Excalibur
 
-A persistent Excalidraw service for humans and agents. The local-only React editor
-supports live canvas collaboration with SQLite persistence and a canvas-scoped
-HTTP MCP toolkit. Authentication is deferred; this service is local-only.
+A persistent Excalidraw service for humans and agents. The React editor supports
+live canvas collaboration with SQLite persistence. PropelAuth protects the web UI,
+HTTP API and WebSockets. The canvas-scoped HTTP MCP toolkit remains local-only
+and is disabled in authenticated mode until MCP OAuth is implemented.
 
 See the [high-level design](docs/high-level-design.md) for scope, architecture, permissions, and deployment direction.
 
@@ -35,26 +36,92 @@ and MCP without authentication—do not use it on an untrusted network or forwar
 these ports publicly.** Some browser features, such as clipboard access, still
 require HTTPS outside localhost.
 
-**There is no authentication. Do not expose either server publicly.** Every local
+**The default `pnpm dev` mode has no authentication. Do not expose either server publicly.** Every local
 session uses the same fixed development user and organization. The backend binds
 to loopback by default and rejects non-local hosts and unrelated browser origins.
 These safeguards are not a substitute for authentication.
 
-Configuration is read from environment variables; see `.env.example`. Local
-`.env` files are not automatically loaded. `HOST`, `PORT`, `PUBLIC_URL`, and `DATABASE_PATH` are
+Configuration is read from environment variables; see `.env.example`. `pnpm dev`
+loads `.env` when present; existing shell variables take precedence. Other commands
+do not automatically load `.env`. `HOST`, `PORT`, `PUBLIC_URL`, and `DATABASE_PATH` are
 supported. Vite's proxy follows `PORT` (3000 by default).
 
 ```sh
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm start
+AUTH_MODE=development pnpm start
 ```
 
 After building, **http://127.0.0.1:3000** serves both the UI and API. Editor fonts
 are copied from the pinned Excalidraw package and served locally. The editor is
 lazy-loaded; its upstream bundle is large and currently triggers Vite's chunk-size
 warning.
+
+## PropelAuth login and live authentication
+
+Use the same application image for local or authenticated deployment. Outside
+the development commands, `AUTH_MODE` defaults to `propelauth`; missing credentials
+fail startup. `AUTH_MODE=development` is an explicit local-only opt-out. Supplying
+PropelAuth credentials in development mode is rejected to prevent accidental bypass.
+
+1. Create or choose a PropelAuth project/environment. Configure its Application
+   URL and allowed frontend origins to match `PUBLIC_URL` exactly, including port.
+   For local authenticated development, use `http://127.0.0.1:5173` consistently
+   (do not alternate with `localhost`).
+2. Enable the desired login methods and invite users into organizations. The UI
+   uses PropelAuth-hosted login, returns to the original canvas link, and offers
+   an org selector and sign-out. Users with no org see an invitation message.
+3. Provide runtime environment variables, then run `pnpm dev` or the built server:
+
+   ```sh
+   export AUTH_MODE=propelauth
+   export PROPELAUTH_AUTH_URL=https://your-project.propelauthtest.com
+   export PROPELAUTH_API_KEY=your-server-side-api-key
+   export PUBLIC_URL=http://127.0.0.1:5173 # production: https://draw.example.com
+   pnpm dev
+   ```
+
+The API key is server-only. The browser receives only the auth mode and public
+Auth URL from `/api/auth/config`, so images do not need rebuilding for each
+environment. `pnpm dev` loads these variables from `.env` when present. For other
+commands, export/inject them or use Node's `--env-file=.env` option.
+
+API requests send `Authorization: Bearer <access-token>`. List/create requests
+also select an org with `X-Organization-Id` (optional for users with exactly one
+org). Canvas-specific requests resolve the canvas's own org after access checks,
+so deep links work even when another org is selected. Identity always comes from
+the validated token. Org membership and enabled/unlocked account status are
+checked against PropelAuth on every HTTP request and ticket issuance; auth
+service failures deny access. This deliberately trades an extra network call for
+fresh authorization. Private canvases remain creator-only within their org.
+
+For live editing, the browser first calls
+`POST /api/canvases/:id/live-ticket` with its bearer token and `Origin`. It then
+connects to `/api/canvases/:id/live?ticket=...`. Tickets are random, single-use,
+valid for 30 seconds, and bound to the user/org, canvas and exact browser origin.
+Every reconnect requests a new ticket. Ticket state is process-local and bounded;
+a restart invalidates pending tickets. No long-lived bearer token enters a URL.
+**Redact query strings on live routes in reverse-proxy/access logs**, since even
+short-lived tickets are credentials. The application does not log ticket URLs.
+
+Membership is checked at ticket issuance; an already-issued ticket has at most
+a 30-second authorization window. Established live connections retain their
+authorization until disconnect, including after token expiry or remote membership
+revocation. Signing out in the app unmounts the editor and closes its socket.
+Immediate cross-device revocation is not implemented. Authorization failures
+stop live editing; export unsaved work before reloading/signing in again.
+
+In production, use HTTPS/WSS behind a trusted reverse proxy. Preserve the public
+`Host` header and support WebSocket upgrades; forwarded headers are not trusted.
+Only the configured `PUBLIC_URL` origin/host is accepted for API calls and upgrades.
+Cross-site top-level HTML navigation is allowed so hosted login can return to the app.
+Health probes must use that public Host header too. `--allow-local` is for
+unauthenticated development only. Do not publish Vite in production.
+
+Existing local canvases retain `development-user` / `development-organization`
+ownership and are **not** automatically claimed by the first logged-in user.
+Back up the database before any deliberate ownership migration.
 
 ## MCP
 
@@ -73,7 +140,8 @@ on disconnect, without changing the saved canvas or its revision.
 address with `--allow-local`), port 3000 by default in production. Standard
 development and build commands prepare the headless renderer automatically.
 
-**No authentication is enabled. Keep the endpoint local-only.**
+**MCP has no OAuth integration yet. Keep it local-only.** In PropelAuth mode,
+`/mcp` returns `503` rather than accepting browser tokens or bypassing login.
 
 ## Pinned comments
 
@@ -90,8 +158,7 @@ Agents can also retrieve, add, and resolve notes through MCP.
 
 - Numbered SQL migrations in `migrations/` run transactionally on server startup.
 - Canvas service operations carry a server-created user/organization context.
-  Owner and organization access checks are already in place; later authentication
-  must validate membership before supplying that context.
+  Authenticated mode validates current membership before supplying that context.
 - Scenes preserve native element fields, bindings, ordering and deletion
   tombstones. Only the canvas background is a shared editor setting for now;
   viewport, selection, and other local state are not persisted.
@@ -126,7 +193,7 @@ accepted from client payloads.
 
 - `src/web/`: browser UI and Excalidraw integration.
 - `src/server/`: application startup and configuration.
-  - `auth/`: operation context and fixed development identity.
+  - `auth/`: PropelAuth adapter, single-use live tickets and development identity.
   - `canvas/`: shared canvas service and access checks.
   - `http/`: Hono API routes, middleware, and built-web-asset serving.
    - `live/`: canvas-scoped WebSocket subscriptions and heartbeat/backpressure handling.
@@ -148,6 +215,10 @@ docker compose up --build
 ```
 
 Open http://127.0.0.1:3000. Compose publishes the container only on host loopback.
+Compose explicitly defaults to local development auth. To enable PropelAuth, set
+`AUTH_MODE=propelauth`, `PROPELAUTH_AUTH_URL`, `PROPELAUTH_API_KEY` and `PUBLIC_URL`
+in the Compose environment (or a private Compose `.env`). Route your HTTPS proxy
+to the loopback-published port and preserve the public Host header.
 The image contains the server, built web assets, fonts and migrations, and runs as
 a non-root user. SQLite lives on the named volume mounted at `/app/data`.
 

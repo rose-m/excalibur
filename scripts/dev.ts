@@ -8,6 +8,7 @@ export function devEnvironment(args: string[], env: NodeJS.ProcessEnv = process.
   const allowLocal = values["allow-local"];
   return {
     ...env,
+    AUTH_MODE: env.AUTH_MODE ?? (env.PROPELAUTH_AUTH_URL || env.PROPELAUTH_API_KEY ? "propelauth" : "development"),
     EXCALIBUR_ALLOW_LOCAL: allowLocal ? "1" : "0",
     PUBLIC_URL: env.PUBLIC_URL ?? `http://${allowLocal && addresses[0] ? addresses[0] : "127.0.0.1"}:5173`,
   };

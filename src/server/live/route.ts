@@ -21,8 +21,9 @@ function send(socket: WSContext, message: ServerMessage) {
 
 export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpEnv> {
   return async (c, next) => {
-    // Local origin validation middleware runs before this. Require Origin even
-    // for non-browser clients; cookies/tokens never travel in the URL.
+    // Origin validation and (in authenticated mode) single-use ticket consumption
+    // run before this. Require Origin even for non-browser clients; long-lived
+    // access tokens never travel in the URL.
     if (!c.req.header("origin")) throw new ServiceError(403, "WebSocket Origin is required");
     const context = c.get("context");
     const id = c.req.param("id")!;

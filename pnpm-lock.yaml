@@ -23,6 +23,12 @@ importers:
       '@napi-rs/canvas':
         specifier: ^1.1.0
         version: 1.1.0
+      '@propelauth/node':
+        specifier: ^2.1.36
+        version: 2.1.36
+      '@propelauth/react':
+        specifier: ^2.1.1
+        version: 2.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       fractional-indexing:
         specifier: 3.2.0
         version: 3.2.0
@@ -444,6 +450,21 @@ packages:
 
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
+
+  '@propelauth/javascript@2.0.24':
+    resolution: {integrity: sha512-3SCR8joLjaLCYgIevXrb4K70OKxYUxVx7HC/wundqGw5AIOWCVoXoZM+HC+sxs+HYU+tlEGa7bv4/D7OV5vZJA==}
+
+  '@propelauth/node-apis@2.1.36':
+    resolution: {integrity: sha512-ynab7KabIGHLuHIf7ik/es+uh6GL7mJOoM8HkFswSHdyx7NsT+MiKth3yr83QVFmozAJCrVV1WHhFQDQ50THTw==}
+
+  '@propelauth/node@2.1.36':
+    resolution: {integrity: sha512-o+usy2TWtY2yTDTeL/gKaOMDWJpgzgUah9aRr/fHw7iHwEAbVZpxhw6jdQ5nvBFCcit0VqVUb72CO8ZM10laLg==}
+
+  '@propelauth/react@2.1.1':
+    resolution: {integrity: sha512-DloHTQL7pCayuGt2cdvJTQyIvuhoXfjFepxoIm6qF1BL1+UbmuL3b0rS+39rcP03FHa1eCtwarg9bvsd6CXxCw==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   '@radix-ui/primitive@1.0.0':
     resolution: {integrity: sha512-3e7rn8FDMin4CgeL7Z/49smCA3rFYY3Ha2rUQ7HRWFadS5iCRw08ZgVT1LaNTCNqgvrUiyczLflrVrF0SRQtNA==}
@@ -1470,6 +1491,9 @@ packages:
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
 
+  hoist-non-react-statics@3.3.2:
+    resolution: {integrity: sha512-/gGivxi8JPKWNm/W0jSmzcMPpfpPLc3dY/6GxhX2hQ9iGj3aDfklV4ET7NjKpSinLpJ5vafa9iiGIEZg10SfBw==}
+
   hono@4.13.16:
     resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
@@ -1535,6 +1559,9 @@ packages:
 
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
   jose@6.2.15:
     resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
@@ -1792,6 +1819,9 @@ packages:
     peerDependencies:
       react: ^18.3.1
 
+  react-is@16.13.1:
+    resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
+
   react-remove-scroll-bar@2.3.8:
     resolution: {integrity: sha512-9r+yi9+mgU33AKcj6IbT9oRCO78WriSj6t/cF8DWBZJ9aOGPOTEDvdUDz1FwKim7QXWwmHqtdHnRJfhAxEG46Q==}
     engines: {node: '>=10'}
@@ -1999,6 +2029,10 @@ packages:
     resolution: {integrity: sha512-6L+EeigHMQhdaIPNIFUKwfWJSwWFQ8gJbJ2DLOs5sDIegTwR9fRxvnM3uciHKjIZhFz+KAv2emhWMRvDmMcY8A==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  utility-types@3.11.0:
+    resolution: {integrity: sha512-6Z7Ma2aVEWisaL6TvBCy7P8rm2LQoPv6dJ7ecIaIixHcwfbJ0x7mWdbcwlIM5IGQxPZSFYeqRCqlOOeKoJYMkw==}
+    engines: {node: '>= 4'}
 
   uuid@14.0.3:
     resolution: {integrity: sha512-Sc5u1VVln93y1Xnz4R+CunOZc7R9LUcTmhj7Rc7Eg3HVcf7rVn2FOoa812fe0W8p3jD7xeoGSYbfqCGGH2B6xw==}
@@ -2444,6 +2478,23 @@ snapshots:
       '@napi-rs/canvas-win32-x64-msvc': 1.1.0
 
   '@oxc-project/types@0.156.0': {}
+
+  '@propelauth/javascript@2.0.24': {}
+
+  '@propelauth/node-apis@2.1.36': {}
+
+  '@propelauth/node@2.1.36':
+    dependencies:
+      '@propelauth/node-apis': 2.1.36
+      jose: 5.10.0
+
+  '@propelauth/react@2.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@propelauth/javascript': 2.0.24
+      hoist-non-react-statics: 3.3.2
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+      utility-types: 3.11.0
 
   '@radix-ui/primitive@1.0.0':
     dependencies:
@@ -3406,6 +3457,10 @@ snapshots:
 
   hachure-fill@0.5.2: {}
 
+  hoist-non-react-statics@3.3.2:
+    dependencies:
+      react-is: 16.13.1
+
   hono@4.13.16: {}
 
   html-encoding-sniffer@4.0.0:
@@ -3461,6 +3516,8 @@ snapshots:
   is-potential-custom-element-name@1.0.1: {}
 
   isexe@2.0.0: {}
+
+  jose@5.10.0: {}
 
   jose@6.2.15: {}
 
@@ -3700,6 +3757,8 @@ snapshots:
       react: 18.3.1
       scheduler: 0.23.2
 
+  react-is@16.13.1: {}
+
   react-remove-scroll-bar@2.3.8(@types/react@18.3.31)(react@18.3.1):
     dependencies:
       react: 18.3.1
@@ -3928,6 +3987,8 @@ snapshots:
   use-sync-external-store@1.7.0(react@18.3.1):
     dependencies:
       react: 18.3.1
+
+  utility-types@3.11.0: {}
 
   uuid@14.0.3: {}
 

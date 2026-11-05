@@ -8,8 +8,9 @@ import type { LiveRecovery, LiveStatus } from "./live-canvas.js";
 import { createLiveEditor } from "./live-editor.js";
 import type { CommentState } from "../shared/comments.js";
 import Comments from "./Comments.js";
+import { api } from "./api.js";
 
-export default function Editor({ canvas }: { canvas: CanvasDocument }) {
+export default function Editor({ canvas, authenticated = false }: { canvas: CanvasDocument; authenticated?: boolean }) {
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ ready: false, message: "Connecting…", error: "" });
   const [comments, setComments] = useState<CommentState>({ revision: -1, comments: [] });
@@ -27,7 +28,8 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
 
   useEffect(() => {
     if (!editor) return;
-    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current, onComments: receiveComments });
+    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current, onComments: receiveComments,
+      getTicket: authenticated ? () => api.ticket(canvas.id).then(result => result.ticket) : undefined });
     live.current = client;
     client.connect();
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -39,7 +41,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
       recovery.current = client.dispose();
       live.current = null;
     };
-  }, [canvas, editor, receiveComments]);
+  }, [canvas, editor, receiveComments, authenticated]);
 
   return <main className="editor-page">
     <header className="editor-header">
@@ -65,6 +67,6 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
       </Excalidraw>
       {editor && <Comments canvasId={canvas.id} editor={editor} toolbar={commentToolbar} state={comments} ready={status.ready} onUpdate={receiveComments} />}
     </div>
-    <footer className="editor-footer">Local development · Live canvas · PNG/JPEG/GIF/WebP images, up to 5 MiB each</footer>
+    <footer className="editor-footer">{!authenticated && "Local development · "}Live canvas · PNG/JPEG/GIF/WebP images, up to 5 MiB each</footer>
   </main>;
 }

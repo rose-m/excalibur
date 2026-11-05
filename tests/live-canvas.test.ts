@@ -108,6 +108,58 @@ function update(revision: number, sharedSettings = black): SceneUpdate {
   return { revision, elements: [], files: {}, sharedSettings };
 }
 
+test("ticket authentication waits before opening and fetches a fresh ticket on reconnect", async () => {
+  const canvas = document();
+  const editor = new DeferredEditor();
+  const sockets: FakeSocket[] = [];
+  const urls: string[] = [];
+  let issues = 0;
+  const client = new LiveCanvas(canvas, editor, () => {}, {
+    baseUrl: "https://app.example",
+    getTicket: async () => `ticket-${++issues}`,
+    createSocket: url => { urls.push(url); const socket = new FakeSocket(); sockets.push(socket); return socket; },
+  });
+  try {
+    client.connect();
+    assert.equal(sockets.length, 0, "a socket must not open before authorization completes");
+    await Promise.resolve();
+    assert.equal(new URL(urls[0]!).protocol, "wss:");
+    assert.equal(new URL(urls[0]!).searchParams.get("ticket"), "ticket-1");
+    sockets[0]!.message({ type: "snapshot", canvas });
+    editor.applyAll();
+    sockets[0]!.disconnect();
+    await new Promise(resolve => setTimeout(resolve, 450));
+    assert.equal(issues, 2);
+    assert.equal(new URL(urls[1]!).searchParams.get("ticket"), "ticket-2");
+  } finally { client.dispose(); }
+});
+
+test("disposing during ticket issuance prevents a late socket; auth failures never open one", async () => {
+  let resolveTicket!: (ticket: string) => void;
+  let sockets = 0;
+  const statuses: LiveStatus[] = [];
+  const options = {
+    baseUrl: "https://app.example",
+    getTicket: () => new Promise<string>(resolve => { resolveTicket = resolve; }),
+    createSocket: () => { sockets++; return new FakeSocket(); },
+  };
+  const client = new LiveCanvas(document(), new DeferredEditor(), status => statuses.push(status), options);
+  client.connect();
+  client.dispose();
+  resolveTicket("late");
+  await Promise.resolve();
+  assert.equal(sockets, 0);
+  const denied = new LiveCanvas(document(), new DeferredEditor(), status => statuses.push(status), {
+    ...options, getTicket: async () => { throw new Error("Unauthorized"); },
+  });
+  denied.connect();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(sockets, 0);
+  assert.match(statuses.at(-1)!.error, /authorize live access/);
+  denied.dispose();
+});
+
 test("selection changes publish temporary state without dirtying or mutating the scene", () => {
   const f = fixture();
   try {

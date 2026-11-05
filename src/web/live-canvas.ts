@@ -14,6 +14,7 @@ type LiveOptions = {
   createSocket?: (url: string) => LiveSocket;
   recovery?: LiveRecovery | undefined;
   onComments?: (state: CommentState) => void;
+  getTicket?: (() => Promise<string>) | undefined;
 };
 
 export class LiveCanvas {
@@ -53,7 +54,16 @@ export class LiveCanvas {
       return;
     }
     this.status({ ready: false, message: "Connecting…", error: "" });
+    if (this.options.getTicket) {
+      void this.options.getTicket().then(ticket => {
+        if (!this.stopped && !this.blocked) this.openSocket(ticket);
+      }).catch(() => { if (!this.stopped && !this.blocked) this.fail("Could not authorize live access. Export unsaved work, then reload to sign in again."); });
+    } else this.openSocket();
+  }
+
+  private openSocket(ticket?: string) {
     const url = new URL(`/api/canvases/${this.canvas.id}/live`, this.options.baseUrl ?? window.location.href);
+    if (ticket) url.searchParams.set("ticket", ticket);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     const socket = this.options.createSocket ? this.options.createSocket(url.href) : new WebSocket(url);
     this.socket = socket;

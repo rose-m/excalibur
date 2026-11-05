@@ -5,14 +5,25 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+let credentials: (() => { token: string; organizationId?: string }) | undefined;
+export function configureApi(provider?: typeof credentials) { credentials = provider; }
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, options);
+  const headers = new Headers(options?.headers);
+  const auth = credentials?.();
+  if (auth) {
+    headers.set("authorization", `Bearer ${auth.token}`);
+    if (auth.organizationId) headers.set("x-organization-id", auth.organizationId);
+  }
+  const response = await fetch(path, { ...options, headers });
   const body = await response.json() as T & { error?: string };
   if (!response.ok) throw new ApiError(response.status, body.error ?? "Request failed");
   return body;
 }
 
 export const api = {
+  me: () => request<{ userId: string; organizations: { id: string; name: string }[] }>("/api/auth/me"),
+  ticket: (id: string) => request<{ ticket: string }>(`/api/canvases/${id}/live-ticket`, { method: "POST" }),
   list: () => request<CanvasMetadata[]>("/api/canvases"),
   create: (title: string) => request<CanvasDocument>("/api/canvases", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),

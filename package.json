@@ -8,8 +8,8 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "tsx scripts/dev.ts",
-    "dev:server": "PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:5173} tsx watch src/server/index.ts",
+    "dev": "tsx --env-file-if-exists=.env scripts/dev.ts",
+    "dev:server": "AUTH_MODE=${AUTH_MODE:-development} PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:5173} tsx watch src/server/index.ts",
     "dev:web": "pnpm assets && vite --port 5173 --strictPort",
     "assets": "node scripts/copy-editor-assets.mjs",
     "build": "pnpm assets && pnpm build:headless && tsc && vite build",
@@ -39,6 +39,8 @@
     "@modelcontextprotocol/core": "2.4.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@napi-rs/canvas": "^1.1.0",
+    "@propelauth/node": "^2.1.36",
+    "@propelauth/react": "^2.1.1",
     "fractional-indexing": "3.2.0",
     "hono": "^4.13.16",
     "image-size": "^2.0.4",

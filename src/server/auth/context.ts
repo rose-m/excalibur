@@ -3,8 +3,8 @@ export type OperationContext = Readonly<{
   organizationId: string;
 }>;
 
-// Local development only. A future authenticated adapter must validate current
-// membership before constructing this context; never use client-supplied IDs.
+// Local development only. The authenticated adapter validates current membership
+// before constructing an operation context; never trust client-supplied identity.
 export const developmentContext: OperationContext = Object.freeze({
   userId: "development-user",
   organizationId: "development-organization",

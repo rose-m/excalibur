@@ -52,3 +52,8 @@ input { flex: 1; min-width: 0; border: 1px solid #d9d7eb; border-radius: 8px; pa
 .comment-error { color: #9b2727; font-size: 12px; margin: 12px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (pointer: coarse) { .comment-tool { height: 44px; } .comment-pin { width: 42px; height: 42px; transform: translate(-4px, -38px); } .comment-actions button { min-height: 44px; } }
+.auth-header { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; padding: .75rem 1.5rem; border-bottom: 1px solid #ddd; }
+.authenticated-app { height: 100dvh; display: flex; flex-direction: column; }
+.authenticated-app > .editor-page { height: auto; flex: 1; min-height: 0; }
+.authenticated-app > .canvas-list { width: 100%; overflow: auto; }
+.auth-header { flex-shrink: 0; }

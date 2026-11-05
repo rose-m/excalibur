@@ -5,7 +5,7 @@ import { api } from "./api.js";
 
 const Editor = lazy(() => import("./Editor.js"));
 
-function CanvasList() {
+function CanvasList({ authenticated }: { authenticated: boolean }) {
   const [canvases, setCanvases] = useState<CanvasMetadata[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
@@ -34,7 +34,7 @@ function CanvasList() {
   }
 
   return <main className="canvas-list">
-    <p className="eyebrow">EXCALIBUR · LOCAL DEVELOPMENT</p>
+    <p className="eyebrow">EXCALIBUR{!authenticated && " · LOCAL DEVELOPMENT"}</p>
     <h1>Your canvases</h1>
     <p className="muted">A persistent space to think, sketch, and connect ideas.</p>
     <form onSubmit={(event) => { void create(event); }} className="create-form">
@@ -56,11 +56,11 @@ function CanvasList() {
         </li>)}
       </ul>}
     {!loading && !error && canvases.length === 0 && <p className="empty">No canvases yet. Create your first one above.</p>}
-    <p className="local-notice">Authentication is disabled. All local sessions share one development identity.</p>
+    {!authenticated && <p className="local-notice">Authentication is disabled. All local sessions share one development identity.</p>}
   </main>;
 }
 
-function CanvasPage({ id }: { id: string }) {
+function CanvasPage({ id, authenticated }: { id: string; authenticated: boolean }) {
   const [canvas, setCanvas] = useState<CanvasDocument>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -72,14 +72,14 @@ function CanvasPage({ id }: { id: string }) {
   if (error) return <main className="canvas-list"><a href="/">← Canvases</a><p role="alert" className="error">{error}</p></main>;
   if (!canvas) return <main className="canvas-list" role="status">Loading canvas…</main>;
   return <Suspense fallback={<main className="canvas-list" role="status">Loading editor…</main>}>
-    <Editor key={canvas.id} canvas={canvas} />
+    <Editor key={canvas.id} canvas={canvas} authenticated={authenticated} />
   </Suspense>;
 }
 
-export function App() {
+export function App({ authenticated = false }: { authenticated?: boolean }) {
   const path = window.location.pathname;
   const match = /^\/canvases\/([a-f0-9-]{36})$/.exec(path);
-  if (match) return <CanvasPage id={match[1]!} />;
-  if (path === "/") return <CanvasList />;
+  if (match) return <CanvasPage id={match[1]!} authenticated={authenticated} />;
+  if (path === "/") return <CanvasList authenticated={authenticated} />;
   return <main className="canvas-list"><h1>Page not found</h1><a href="/">Back to canvases</a></main>;
 }
