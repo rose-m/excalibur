@@ -6,7 +6,7 @@ import { HeadlessService } from "../render/client.js";
 import type { HttpEnv } from "../http/types.js";
 import { createCanvasMcpServer } from "./server.js";
 
-export function createMcpRoutes(canvases: CanvasService, publicUrl: string) {
+export function createMcpRoutes(canvases: CanvasService, publicUrl: string, localOrigins?: ReadonlySet<string>) {
   const routes = new Hono<HttpEnv>();
   const headless = new HeadlessService();
   const drawing = new DrawingService(canvases, headless);
@@ -14,7 +14,7 @@ export function createMcpRoutes(canvases: CanvasService, publicUrl: string) {
     // Each exchange gets its own protocol server and validated operation context.
     // Transport lifetime is never canvas lifetime, and no tool chooses a canvas
     // implicitly. The SDK serves modern per-request and legacy stateless HTTP.
-    const handler = createMcpHandler(() => createCanvasMcpServer(canvases, drawing, headless, c.get("context"), publicUrl), {
+    const handler = createMcpHandler(() => createCanvasMcpServer(canvases, drawing, headless, c.get("context"), publicUrl, localOrigins), {
       legacy: "stateless", maxRequestBodySize: 24 * 1024 * 1024,
     });
     try { return await handler.fetch(c.req.raw); }

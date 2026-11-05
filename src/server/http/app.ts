@@ -3,16 +3,17 @@ import { bodyLimit } from "hono/body-limit";
 import { developmentContext } from "../auth/context.js";
 import type { CanvasService } from "../canvas/service.js";
 import { handleError } from "./errors.js";
-import { localRequestsOnly } from "./local-request.js";
+import { localRequestPolicy, localRequestsOnly } from "./local-request.js";
 import { createCanvasRoutes } from "./routes/canvases.js";
 import { healthRoutes } from "./routes/health.js";
 import { createWebRoutes } from "./routes/web.js";
 import type { HttpEnv } from "./types.js";
 import { createMcpRoutes } from "../mcp/route.js";
 
-export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`) {
+export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`, network: { allowLocal?: boolean; localAddresses?: string[] } = {}) {
   const app = new Hono<HttpEnv>();
-  const mcp = createMcpRoutes(service, publicUrl);
+  const policy = localRequestPolicy(port, network.allowLocal, network.localAddresses);
+  const mcp = createMcpRoutes(service, publicUrl, network.allowLocal ? policy.origins : undefined);
 
   app.use("*", async (c, next) => {
     c.header("X-Content-Type-Options", "nosniff");
@@ -20,7 +21,7 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
     c.header("Cache-Control", "no-store");
     await next();
   });
-  app.use("*", localRequestsOnly(port));
+  app.use("*", localRequestsOnly(port, policy));
   app.use("*", async (c, next) => {
     // Replace this middleware with validated identity/membership later.
     c.set("context", developmentContext);

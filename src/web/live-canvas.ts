@@ -2,6 +2,7 @@ import type { CanvasDocument, Scene, SceneUpdate } from "../shared/canvas.js";
 import type { ServerMessage } from "../shared/live.js";
 import { applyUpdate, pendingMutation, SharedSettingsTracker } from "./live-state.js";
 import type { LiveEditor } from "./live-state.js";
+import { requestId } from "./request-id.js";
 
 export type LiveStatus = { ready: boolean; message: string; error: string };
 
@@ -183,7 +184,7 @@ export class LiveCanvas {
     if (mutation.elements.some((element) => element.type === "image" && !element.isDeleted
       && typeof element.fileId === "string" && !Object.hasOwn(this.scene().files, element.fileId))) return;
     if (this.socket?.readyState !== 1) return;
-    this.inFlight = crypto.randomUUID();
+    this.inFlight = requestId();
     this.status({ ready: true, message: "Live · Saving…", error: "" });
     try {
       this.socket.send(JSON.stringify({ type: "mutate", requestId: this.inFlight, mutation }));

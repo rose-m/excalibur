@@ -27,7 +27,7 @@ function result(value: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingService, headless: HeadlessService, context: OperationContext, publicUrl: string) {
+export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingService, headless: HeadlessService, context: OperationContext, publicUrl: string, localOrigins?: ReadonlySet<string>) {
   const server = new McpServer({ name: "excalibur", version: "0.0.0" }, {
     capabilities: { tools: {} },
     instructions: "All canvas tools require an explicit canvasId or application canvas URL. Create a canvas deliberately once, keep its returned ID, and reuse it after reconnects. Drawing helpers generate native Excalidraw elements, labels and bindings. Batch edits commit atomically and publish live updates. Read revision before read–modify–write and pass expectedRevision to reject stale edits. There is no global current canvas. This development endpoint has no authentication and must remain local-only.",
@@ -46,7 +46,7 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
       }
     });
   }
-  const id = (reference: string) => resolveCanvasId(reference, publicUrl);
+  const id = (reference: string) => resolveCanvasId(reference, publicUrl, localOrigins);
   const document = (reference: string) => canvases.get(context, id(reference));
   const withIdentity = (canvasId: string, value: Record<string, unknown>) => result({ canvasId, url: canvasUrl(canvasId, publicUrl), ...value });
 

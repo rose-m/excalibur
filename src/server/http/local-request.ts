@@ -1,22 +1,28 @@
 import { createMiddleware } from "hono/factory";
 import { ServiceError } from "../canvas/errors.js";
 import type { HttpEnv } from "./types.js";
+import { isLocalAddress, localAddresses } from "../local-network.js";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function localRequestsOnly(port: number) {
-  const allowedOrigins = new Set([
-    `http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`,
-    "http://localhost:5173", "http://127.0.0.1:5173",
-  ]);
+export function localRequestPolicy(port: number, allowLocal = false, addresses = localAddresses()) {
+  const hosts = new Set(localHosts);
+  if (allowLocal) for (const address of addresses) if (isLocalAddress(address)) hosts.add(address);
+  const origins = new Set([...hosts].flatMap(host => [`http://${host}:${port}`, `http://${host}:5173`]));
+  return { hosts, origins };
+}
+
+export function localRequestsOnly(port: number, policy = localRequestPolicy(port)) {
 
   return createMiddleware<HttpEnv>(async (c, next) => {
     // Not authentication: reduce accidental exposure and access from unrelated
     // websites while every local session shares the development identity.
-    const host = new URL(`http://${c.req.header("host") ?? "invalid"}`);
-    if (!localHosts.has(host.hostname)) throw new ServiceError(403, "Local development hosts only");
+    let host: URL;
+    try { host = new URL(`http://${c.req.header("host") ?? "invalid"}`); }
+    catch { throw new ServiceError(403, "Invalid request host"); }
+    if (!policy.hosts.has(host.hostname) || host.username || host.password || host.pathname !== "/" || host.search || host.hash) throw new ServiceError(403, "Local development hosts only");
     const origin = c.req.header("origin");
-    if (origin && !allowedOrigins.has(origin)) {
+    if (origin && !policy.origins.has(origin)) {
       throw new ServiceError(403, "Origin not allowed");
     }
     if (c.req.header("sec-fetch-site") === "cross-site") {

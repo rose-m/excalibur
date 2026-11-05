@@ -8,9 +8,9 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "pnpm build:headless && concurrently -k -n server,web,headless \"pnpm dev:server\" \"pnpm dev:web\" \"node scripts/build-headless.mjs --watch\"",
+    "dev": "tsx scripts/dev.ts",
     "dev:server": "PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:5173} tsx watch src/server/index.ts",
-    "dev:web": "pnpm assets && vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev:web": "pnpm assets && vite --port 5173 --strictPort",
     "assets": "node scripts/copy-editor-assets.mjs",
     "build": "pnpm assets && pnpm build:headless && tsc && vite build",
     "build:headless": "node scripts/build-headless.mjs",

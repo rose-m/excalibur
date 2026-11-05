@@ -22,6 +22,19 @@ Create a canvas and open its `/canvases/:id` URL in two tabs to edit together.
 Wait for “Live · Saved” before closing.
 Scenes and image bytes survive server restarts in `data/excalibur.sqlite`.
 
+For iPad or other devices on the same trusted network:
+
+```sh
+pnpm dev --allow-local
+```
+
+Open one of the printed LAN URLs on the device. This binds both servers to
+`0.0.0.0` and permits this machine's private IPv4 addresses and matching browser
+origins. The default remains loopback-only. **LAN mode exposes the editor, API,
+and MCP without authentication—do not use it on an untrusted network or forward
+these ports publicly.** Some browser features, such as clipboard access, still
+require HTTPS outside localhost.
+
 **There is no authentication. Do not expose either server publicly.** Every local
 session uses the same fixed development user and organization. The backend binds
 to loopback by default and rejects non-local hosts and unrelated browser origins.
@@ -29,8 +42,7 @@ These safeguards are not a substitute for authentication.
 
 Configuration is read from environment variables; see `.env.example`. Local
 `.env` files are not automatically loaded. `HOST`, `PORT`, `PUBLIC_URL`, and `DATABASE_PATH` are
-supported. Vite's API proxy assumes the default backend port 3000; update
-`vite.config.ts` if changing it.
+supported. Vite's proxy follows `PORT` (3000 by default).
 
 ```sh
 pnpm typecheck
@@ -57,9 +69,9 @@ The client discovers the available tools and their parameters automatically.
 Selections are available per connected editor tab; they are temporary and cleared
 on disconnect, without changing the saved canvas or its revision.
 
-`PUBLIC_URL` controls returned canvas URLs: port 5173 in development, port 3000
-by default in production. Standard development and build commands prepare the
-headless renderer automatically.
+`PUBLIC_URL` controls returned canvas URLs: port 5173 in development (using a LAN
+address with `--allow-local`), port 3000 by default in production. Standard
+development and build commands prepare the headless renderer automatically.
 
 **No authentication is enabled. Keep the endpoint local-only.**
 
