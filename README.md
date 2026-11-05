@@ -83,6 +83,8 @@ resizing, and rotation. Open a pin
 and choose **Resolve** to delete the note. Comments persist and sync across tabs,
 but stay separate from drawing revisions and Excalidraw/image exports. Deleting
 a drawing element keeps its notes at the element's last retained position.
+Use **Edit** on an open note to change its text; edits sync across tabs.
+Agents can also retrieve, add, and resolve notes through MCP.
 
 ## Persistence and save behavior
 

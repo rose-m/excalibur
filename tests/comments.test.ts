@@ -70,6 +70,37 @@ test("comments enforce canvas access, validate targets, and add/resolve without 
   } finally { repository.close(); }
 });
 
+test("comment edits preserve identity and anchors, reject stale edits and never resurrect resolved notes", () => {
+  const repository = new SqliteCanvasRepository(":memory:");
+  const service = new CanvasService(repository);
+  try {
+    const canvas = service.create(owner, { title: "Editable notes" });
+    const other = service.create(owner, { title: "Other" });
+    const original = note("Original");
+    const created = service.comments.create(owner, canvas.id, original).comments[0]!;
+    let published = 0;
+    service.comments.subscribe(owner, canvas.id, () => { published++; });
+    const input = { text: "  Edited\ntext  ", expectedText: "Original" };
+    const result = service.comments.edit(owner, canvas.id, original.id, input);
+    assert.equal(result.revision, 2);
+    assert.deepEqual(result.comments[0], { ...created, text: "Edited\ntext" });
+    assert.equal(published, 1);
+    assert.deepEqual(service.comments.edit(owner, canvas.id, original.id, input), result, "uncertain saves can be retried");
+    assert.equal(published, 1);
+    assert.throws(() => service.comments.edit(owner, canvas.id, original.id, { text: "Stale edit", expectedText: "Original" }), status(409));
+    assert.throws(() => service.comments.edit(owner, other.id, original.id, input), status(404));
+    assert.throws(() => service.comments.edit({ ...owner, userId: "other" }, canvas.id, original.id, input), status(404));
+    for (const bad of [{ ...input, text: " " }, { ...input, text: "x".repeat(4001) }, { text: "No baseline" }, { ...input, anchor: original.anchor }]) {
+      assert.throws(() => service.comments.edit(owner, canvas.id, original.id, bad));
+    }
+    assert.equal(service.comments.get(owner, canvas.id).revision, 2);
+    service.comments.resolve(owner, canvas.id, original.id);
+    assert.throws(() => service.comments.edit(owner, canvas.id, original.id, input), status(404));
+    assert.deepEqual(service.comments.get(owner, canvas.id), { revision: 3, comments: [] });
+    assert.equal(service.get(owner, canvas.id).revision, 0);
+  } finally { repository.close(); }
+});
+
 test("comment migration preserves existing drawings and comments survive restarts; failed transactions never publish", () => {
   const directory = mkdtempSync(join(tmpdir(), "excalibur-comments-"));
   const oldMigrations = join(directory, "old-migrations");
@@ -99,16 +130,22 @@ test("comment migration preserves existing drawings and comments survive restart
     raw.exec("CREATE TRIGGER fail_comment_revision BEFORE UPDATE OF comments_revision ON canvases BEGIN SELECT RAISE(ABORT, 'test failure'); END");
     assert.throws(() => service.comments.create(owner, canvas.id, note("Must roll back")));
     assert.throws(() => service.comments.resolve(owner, canvas.id, a.id));
+    assert.throws(() => service.comments.edit(owner, canvas.id, a.id, { text: "Must roll back", expectedText: a.text }));
     assert.equal(published, 0);
     assert.equal(service.comments.get(owner, canvas.id).revision, 1);
     assert.equal(service.comments.get(owner, canvas.id).comments.length, 1);
     assert.deepEqual(service.get(owner, canvas.id), original);
     raw.exec("DROP TRIGGER fail_comment_revision");
+    service.comments.edit(owner, canvas.id, a.id, { text: "Persisted edit", expectedText: a.text });
+    repository.close();
+    repository = new SqliteCanvasRepository(filename);
+    service = new CanvasService(repository);
+    assert.equal(service.comments.get(owner, canvas.id).comments[0]!.text, "Persisted edit");
     service.comments.resolve(owner, canvas.id, a.id);
     assert.equal(service.comments.get(owner, canvas.id).comments.length, 0);
     repository.close();
     repository = new SqliteCanvasRepository(filename);
-    assert.deepEqual(new CanvasService(repository).comments.get(owner, canvas.id), { revision: 2, comments: [] });
+    assert.deepEqual(new CanvasService(repository).comments.get(owner, canvas.id), { revision: 3, comments: [] });
   } finally { raw?.close(); repository.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -185,11 +222,22 @@ test("HTTP comments broadcast to live tabs and reconnect snapshots without affec
     const reconnected = await connect(canvas.id);
     assert.deepEqual(reconnected.snapshot.comments, state);
     assert.deepEqual(await (await fetch(endpoint)).json(), state);
+    const editedA = once(a.socket, "message"), editedB = once(b.socket, "message");
+    const editResponse = await fetch(`${endpoint}/${noteA.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Edited from the UI", expectedText: noteA.text }) });
+    assert.equal(editResponse.status, 200);
+    const editedState = await editResponse.json() as CommentState;
+    assert.equal(editedState.comments[0]!.text, "Edited from the UI");
+    assert.equal(editedState.revision, 2);
+    for (const event of [editedA, editedB]) {
+      const [data] = await event;
+      assert.deepEqual(JSON.parse(data.toString()), { type: "comments", state: editedState });
+    }
+    assert.equal((await fetch(`${endpoint}/${noteA.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Conflicting edit", expectedText: noteA.text }) })).status, 409);
     const removed = once(b.socket, "message");
     const resolved = await fetch(`${endpoint}/${noteA.id}`, { method: "DELETE" });
     assert.equal(resolved.status, 200);
     const [data] = await removed;
-    assert.deepEqual(JSON.parse(data.toString()).state, { revision: 2, comments: [] });
+    assert.deepEqual(JSON.parse(data.toString()).state, { revision: 3, comments: [] });
     assert.equal(service.get(owner, canvas.id).revision, 0);
     assert.equal((await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(note(" ")) })).status, 400);
     assert.equal((await fetch(`${base}/api/canvases/${randomUUID()}/comments`)).status, 404);

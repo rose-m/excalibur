@@ -3,6 +3,7 @@ import type { CallToolResult, JsonSchemaType } from "@modelcontextprotocol/serve
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { mutationSchema, sceneSchema } from "../../shared/canvas.js";
+import { createCommentSchema } from "../../shared/comments.js";
 import { signature } from "../../shared/signature.js";
 import type { OperationContext } from "../auth/context.js";
 import { DrawingService, activeElement } from "../canvas/drawing.js";
@@ -99,6 +100,29 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     const canvas = id(args.canvasId);
     return withIdentity(canvas, canvases.getSelectedElements(context, canvas));
   }, true);
+
+  tool("get_comments", "Retrieve all unresolved pinned notes on this canvas. Returns commentsRevision (independent of the drawing revision), comment IDs, text, anchors and creation times. Element anchors use normalized u/v coordinates within the unrotated element bounds; their x/y are fallback scene coordinates, not the current position of a moved element. No threads or resolved-comment archive.", z.strictObject({ canvasId: scope.canvasId }), args => {
+    const canvas = id(args.canvasId);
+    const state = canvases.comments.get(context, canvas);
+    return withIdentity(canvas, { commentsRevision: state.revision, comments: state.comments });
+  }, true);
+  tool("add_comment", "Add a persistent pinned note, visible live in open editors. Supply a canvas anchor for a fixed scene position, or an element anchor to follow a saved element as it moves/resizes/rotates. Text is plain text, at most 4,000 characters. Optionally supply a stable commentId UUID to make retries idempotent. Does not change the drawing revision.", z.strictObject({
+    canvasId: scope.canvasId,
+    commentId: z.uuid().optional().describe("Optional client-generated UUID. Reuse with identical text/anchor when retrying an uncertain save."),
+    text: createCommentSchema.shape.text,
+    anchor: createCommentSchema.shape.anchor.describe("Canvas: {type:'canvas',x,y} in scene coordinates. Element: {type:'element',elementId,u,v,x,y}, where u/v are normalized 0..1 within its unrotated bounds and x/y are fallback scene coordinates. The element must exist on this canvas."),
+  }), args => {
+    const canvas = id(args.canvasId);
+    const commentId = args.commentId ?? randomUUID();
+    const state = canvases.comments.create(context, canvas, { id: commentId, text: args.text, anchor: args.anchor });
+    return withIdentity(canvas, { commentId, commentsRevision: state.revision, comments: state.comments });
+  });
+  tool("resolve_comment", "Resolve a pinned note by permanently deleting it from this canvas. Open editors update live. Safe to repeat if already absent; comments on other canvases are unaffected. Does not change the drawing revision. There is no resolved-comment archive or undo.", z.strictObject({ canvasId: scope.canvasId, commentId: z.uuid() }), args => {
+    const canvas = id(args.canvasId);
+    const state = canvases.comments.resolve(context, canvas, args.commentId);
+    return withIdentity(canvas, { commentId: args.commentId, commentsRevision: state.revision, comments: state.comments });
+  }, false, true);
+
   tool("query_elements", "Query native elements by type, exact field filters, text substring, or origin coordinate range. Deleted elements are excluded by default.", z.strictObject({ canvasId: scope.canvasId, type: z.string().max(40).optional(), text: z.string().max(1000).optional(), filter: z.record(z.string(), z.unknown()).optional(), includeDeleted: z.boolean().default(false), bbox: z.strictObject({ x_min: z.number().optional(), x_max: z.number().optional(), y_min: z.number().optional(), y_max: z.number().optional() }).optional(), limit: z.number().int().min(1).max(1000).default(100), offset: z.number().int().min(0).default(0) }), args => {
     const canvas = document(args.canvasId);
     const matches = canvas.scene.elements.filter(element => {

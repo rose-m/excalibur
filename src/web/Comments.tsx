@@ -10,7 +10,7 @@ import { requestId } from "./request-id.js";
 import { commentShortcutTarget, isCommentShortcut } from "./comment-shortcut.js";
 
 type Props = { canvasId: string; editor: ExcalidrawImperativeAPI; toolbar: HTMLElement | null; state: CommentState; ready: boolean; onUpdate: (state: CommentState) => void };
-type Draft = { id: string; anchor: CommentAnchor; text: string };
+type Draft = { id: string; anchor: CommentAnchor; text: string; expectedText?: string };
 const isCommentTool = (tool: { type: string; customType?: string | null }) => tool.type === "custom" && tool.customType === "comment";
 
 export default function Comments({ canvasId, editor, toolbar, state, ready, onUpdate }: Props) {
@@ -25,6 +25,7 @@ export default function Comments({ canvasId, editor, toolbar, state, ready, onUp
   const [view, setView] = useState(() => ({ key: "", app: editor.getAppState(), elements: editor.getSceneElementsIncludingDeleted() }));
   const mode = isCommentTool(view.app.activeTool);
   const active = state.comments.find(comment => comment.id === activeId);
+  const editing = draft?.expectedText !== undefined;
 
   useEffect(() => {
     const surface = root.current?.parentElement;
@@ -96,8 +97,8 @@ export default function Comments({ canvasId, editor, toolbar, state, ready, onUp
 
   useEffect(() => { if (draft) input.current?.focus(); }, [draft?.id]);
   useEffect(() => {
-    if (activeId && state.revision >= 0 && !active) { setActiveId(null); setError(""); }
-  }, [activeId, active, state.revision]);
+    if (activeId && state.revision >= 0 && !active && !draft) { setActiveId(null); setError(""); }
+  }, [activeId, active, state.revision, draft]);
   useEffect(() => {
     if (!ready && isCommentTool(editor.getAppState().activeTool)) editor.setActiveTool({ type: "selection" });
   }, [ready, editor]);
@@ -124,7 +125,9 @@ export default function Comments({ canvasId, editor, toolbar, state, ready, onUp
     if (!draft || !ready || pending || !draft.text.trim()) return;
     setPending(true); setError("");
     try {
-      const next = await api.createComment(canvasId, draft);
+      const next = draft.expectedText !== undefined
+        ? await api.editComment(canvasId, draft.id, draft.text, draft.expectedText)
+        : await api.createComment(canvasId, { id: draft.id, text: draft.text, anchor: draft.anchor });
       onUpdate(next);
       setActiveId(draft.id);
       setDraft(null);
@@ -158,22 +161,24 @@ export default function Comments({ canvasId, editor, toolbar, state, ready, onUp
           aria-label={`Comment ${index + 1}: ${comment.text.slice(0, 80)}`} aria-expanded={comment.id === activeId} title={comment.text}
           onClick={() => { if (draft || pending) return; setActiveId(comment.id); setError(""); editor.setActiveTool({ type: "selection" }); }}>{index + 1}</button>;
       })}
-      {draft && at && <span className="comment-pin draft" style={{ left: at.x, top: at.y }}>+</span>}
-      {selected && at && <section className="comment-popover" role="dialog" aria-label={draft ? "New comment" : "Comment"}
+      {draft && !editing && at && <span className="comment-pin draft" style={{ left: at.x, top: at.y }}>+</span>}
+      {selected && at && <section className="comment-popover" role="dialog" aria-label={editing ? "Edit comment" : draft ? "New comment" : "Comment"}
         style={{ left: Math.max(12, Math.min(at.x + 24, (rect?.width ?? 360) - 332)), top: Math.max(12, Math.min(at.y + 12, (rect?.height ?? 400) - 290)) }}
         onKeyDown={event => {
           event.stopPropagation();
           if (event.key === "Escape") { event.preventDefault(); close(); }
           if (draft && event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void save(); }
         }}>
-        <header><strong>{draft ? "New comment" : "Comment"}</strong><button type="button" className="comment-close" aria-label="Close comment" disabled={pending} onClick={close}>×</button></header>
+        <header><strong>{editing ? "Edit comment" : draft ? "New comment" : "Comment"}</strong><button type="button" className="comment-close" aria-label="Close comment" disabled={pending} onClick={close}>×</button></header>
         <div className="comment-anchor-label">{selected.anchor.type === "element" ? "Attached to element" : "Pinned to canvas"}</div>
         {draft ? <form onSubmit={event => { event.preventDefault(); void save(); }}>
           <label className="sr-only" htmlFor="comment-text">Comment text</label>
           <textarea id="comment-text" ref={input} rows={4} maxLength={4000} placeholder="Leave a note…" value={draft.text} disabled={pending}
             onChange={event => setDraft({ ...draft, text: event.target.value })}/>
-          <div className="comment-actions"><button type="button" className="secondary" disabled={pending} onClick={close}>Cancel</button><button type="submit" disabled={!ready || pending || !draft.text.trim()}>{pending ? "Saving…" : "Save comment"}</button></div>
-        </form> : <><p className="comment-body">{active?.text}</p><div className="comment-actions"><button type="button" disabled={!ready || pending} onClick={() => void resolve()}>{pending ? "Resolving…" : "Resolve"}</button></div></>}
+          <div className="comment-actions"><button type="button" className="secondary" disabled={pending} onClick={() => { if (editing) { setDraft(null); setError(""); } else close(); }}>Cancel</button><button type="submit" disabled={!ready || pending || !draft.text.trim()}>{pending ? "Saving…" : editing ? "Save changes" : "Save comment"}</button></div>
+        </form> : <><p className="comment-body">{active?.text}</p><div className="comment-actions"><button type="button" className="secondary" disabled={!ready || pending || !active} onClick={() => {
+          if (active) { setDraft({ id: active.id, anchor: active.anchor, text: active.text, expectedText: active.text }); setError(""); }
+        }}>Edit</button><button type="button" disabled={!ready || pending} onClick={() => void resolve()}>{pending ? "Resolving…" : "Resolve"}</button></div></>}
         {error && <p className="comment-error" role="alert">{error}</p>}
         {!ready && <p className="comment-error" role="status">Reconnect before saving or resolving comments.</p>}
       </section>}

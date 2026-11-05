@@ -11,5 +11,6 @@ export interface CanvasRepository {
   getComments(id: string): CommentState;
   addComment(id: string, comment: CanvasComment): CommentState | "limit" | "conflict";
   deleteComment(id: string, commentId: string): CommentState;
+  editComment(id: string, commentId: string, text: string, expectedText: string): CommentState | "missing" | "conflict";
   close(): void;
 }

@@ -21,6 +21,7 @@ export function createCanvasRoutes(service: CanvasService) {
   routes.get("/:id/comments", c => c.json(service.comments.get(c.get("context"), c.req.param("id"))));
   routes.post("/:id/comments", async c => c.json(service.comments.create(c.get("context"), c.req.param("id"), await readJson(c.req)), 201));
   routes.delete("/:id/comments/:commentId", c => c.json(service.comments.resolve(c.get("context"), c.req.param("id"), c.req.param("commentId"))));
+  routes.patch("/:id/comments/:commentId", async c => c.json(service.comments.edit(c.get("context"), c.req.param("id"), c.req.param("commentId"), await readJson(c.req))));
 
   routes.all("/", (c) => c.json({ error: "Method not allowed" }, 405));
   routes.all("/:id", (c) => c.json({ error: "Method not allowed" }, 405));

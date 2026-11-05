@@ -8,6 +8,10 @@ export const commentAnchorSchema = z.discriminatedUnion("type", [
 export const createCommentSchema = z.strictObject({
   id: z.uuid(), text: z.string().trim().min(1).max(4000), anchor: commentAnchorSchema,
 });
+export const editCommentSchema = z.strictObject({
+  text: createCommentSchema.shape.text,
+  expectedText: z.string().min(1).max(4000),
+});
 export type CommentAnchor = z.infer<typeof commentAnchorSchema>;
 export type CanvasComment = z.infer<typeof createCommentSchema> & { createdAt: string };
 export type CommentState = { revision: number; comments: CanvasComment[] };

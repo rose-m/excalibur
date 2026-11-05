@@ -22,4 +22,7 @@ export const api = {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(comment),
   }),
   resolveComment: (id: string, commentId: string) => request<CommentState>(`/api/canvases/${id}/comments/${commentId}`, { method: "DELETE" }),
+  editComment: (id: string, commentId: string, text: string, expectedText: string) => request<CommentState>(`/api/canvases/${id}/comments/${commentId}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, expectedText }),
+  }),
 };

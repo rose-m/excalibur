@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createCommentSchema } from "../../shared/comments.js";
+import { createCommentSchema, editCommentSchema } from "../../shared/comments.js";
 import type { CommentState } from "../../shared/comments.js";
 import type { CanvasDocument } from "../../shared/canvas.js";
 import type { OperationContext } from "../auth/context.js";
@@ -27,6 +27,18 @@ export class CommentService {
     const result = this.repository.addComment(id, { ...comment, createdAt: new Date().toISOString() });
     if (result === "limit") throw new ServiceError(413, "A canvas can have at most 500 comments. Resolve a comment first.");
     if (result === "conflict") throw new ServiceError(409, "Comment ID already exists with different content");
+    if (result.revision !== before.revision) this.publish(id, result);
+    return result;
+  }
+
+  edit(context: OperationContext, id: string, commentId: string, input: unknown) {
+    this.access(context, id);
+    z.uuid().parse(commentId);
+    const { text, expectedText } = editCommentSchema.parse(input);
+    const before = this.repository.getComments(id);
+    const result = this.repository.editComment(id, commentId, text, expectedText);
+    if (result === "missing") throw new ServiceError(404, "This comment was resolved or no longer exists. Your changes have not been saved.");
+    if (result === "conflict") throw new ServiceError(409, "This comment changed elsewhere. Copy your changes, then cancel and reopen Edit to review the latest text.");
     if (result.revision !== before.revision) this.publish(id, result);
     return result;
   }

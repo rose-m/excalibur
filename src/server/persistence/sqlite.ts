@@ -140,6 +140,25 @@ export class SqliteCanvasRepository implements CanvasRepository {
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
 
+  editComment(id: string, commentId: string, text: string, expectedText: string): CommentState | "missing" | "conflict" {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const state = this.getComments(id);
+      const existing = state.comments.find(comment => comment.id === commentId);
+      if (!existing || (existing.text !== expectedText && existing.text !== text)) {
+        this.db.exec("ROLLBACK");
+        return existing ? "conflict" : "missing";
+      }
+      if (existing.text !== text) {
+        this.db.prepare("UPDATE comments SET text = ? WHERE canvas_id = ? AND id = ?").run(text, id, commentId);
+        this.db.prepare("UPDATE canvases SET comments_revision = comments_revision + 1 WHERE id = ?").run(id);
+      }
+      const result = this.getComments(id);
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
   deleteComment(id: string, commentId: string): CommentState {
     this.db.exec("BEGIN IMMEDIATE");
     try {
