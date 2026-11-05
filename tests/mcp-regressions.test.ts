@@ -10,6 +10,67 @@ import { HeadlessService } from "../src/server/render/client.js";
 import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
 import type { Scene } from "../src/shared/canvas.js";
 
+test("generated Excalifont text dimensions match browser metrics rather than fallback fonts", async () => {
+  const headless = new HeadlessService();
+  try {
+    // Measured with Chromium after loading the pinned Excalifont WOFF2. The
+    // old fallback-font measurements were 15–25% narrower and clipped text in
+    // Excalidraw's element cache until double-clicking forced remeasurement.
+    const samples = [
+      { text: "REST + UI", fontSize: 20, width: 110.93996 },
+      { text: "live edits / updates", fontSize: 20, width: 193.45985 },
+      { text: "Local host/origin checks + fixed development identity (auth/context)", fontSize: 22, width: 746.54767 },
+      { text: "Node.js 22+ server · Hono · src/server", fontSize: 28, width: 518.55981 },
+    ];
+    const elements = await headless.convert(samples.map((sample, i) => ({ id: `text${i}`, type: "text", x: 0, y: i * 100, fontFamily: 5, fontSize: sample.fontSize, text: sample.text })));
+    for (const [i, sample] of samples.entries()) {
+      const element = elements.find(e => e.id === `text${i}`)!;
+      assert(Math.abs(Number(element.width) - sample.width) < 0.05, `${sample.text}: generated width ${element.width}, browser width ${sample.width}`);
+      assert.equal(element.height, sample.fontSize * 1.25);
+    }
+  } finally { await headless.close(); }
+});
+
+test("remeasuring legacy text repairs clipped dimensions without changing text, style or routed arrows", async () => {
+  const repository = new SqliteCanvasRepository(":memory:");
+  const canvases = new CanvasService(repository);
+  const headless = new HeadlessService();
+  const drawing = new DrawingService(canvases, headless);
+  const canvas = canvases.create(context, { title: "Legacy font metrics" });
+  try {
+    const text = "Node.js 22+ server · Hono · src/server";
+    await drawing.edit(context, canvas.id, [
+      { op: "create", element: { id: "note", type: "text", x: 20, y: 30, text, fontSize: 28, fontFamily: "excalifont", strokeColor: "#123456" } },
+      { op: "create", element: { id: "arrow", type: "arrow", x: 50, y: 200, points: [[0, 0], [100, 0], [100, 200]], text: "REST + UI" } },
+    ]);
+    const current = canvases.get(context, canvas.id);
+    const note = current.scene.elements.find(e => e.id === "note")!;
+    const arrow = current.scene.elements.find(e => e.id === "arrow")!;
+    const label = current.scene.elements.find(e => e.containerId === "arrow")!;
+    canvases.mutate(context, canvas.id, { expectedRevision: current.revision, elements: [
+      { ...note, width: 430.21289, version: note.version + 1 },
+      { ...label, width: 91.2793, version: label.version + 1 },
+    ] });
+    const revision = canvases.get(context, canvas.id).revision;
+    await drawing.edit(context, canvas.id, [
+      { op: "update", id: "note", changes: { text } },
+      { op: "update", id: label.id, changes: { text: label.originalText } },
+    ], revision);
+    const repaired = canvases.get(context, canvas.id);
+    const nextNote = repaired.scene.elements.find(e => e.id === "note")!;
+    const nextArrow = repaired.scene.elements.find(e => e.id === "arrow")!;
+    const nextLabel = repaired.scene.elements.find(e => e.id === label.id)!;
+    assert(Math.abs(Number(nextNote.width) - 518.55981) < 0.05);
+    assert.equal(nextNote.originalText, text);
+    assert.deepEqual([nextNote.x, nextNote.y, nextNote.strokeColor], [20, 30, "#123456"]);
+    assert(Math.abs(Number(nextLabel.width) - Number(label.width)) < 0.05);
+    assert.equal(nextLabel.originalText, label.originalText);
+    assert.deepEqual(nextArrow.points, arrow.points);
+    assert.deepEqual([nextArrow.x, nextArrow.y], [arrow.x, arrow.y]);
+    assert.equal(repaired.revision, revision + 1);
+  } finally { await headless.close(); repository.close(); }
+});
+
 test("moving and resizing shapes retain native routed arrows and binding metadata", async () => {
   const repository = new SqliteCanvasRepository(":memory:");
   const canvases = new CanvasService(repository);
