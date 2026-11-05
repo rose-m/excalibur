@@ -2,8 +2,8 @@
 
 A persistent Excalidraw service for humans and agents. The React editor supports
 live canvas collaboration with SQLite persistence. PropelAuth protects the web UI,
-HTTP API and WebSockets. The canvas-scoped HTTP MCP toolkit remains local-only
-and is disabled in authenticated mode until MCP OAuth is implemented.
+HTTP API and WebSockets. The canvas-scoped HTTP MCP toolkit supports PropelAuth
+OAuth authentication for agents acting on behalf of users.
 
 See the [high-level design](docs/high-level-design.md) for scope, architecture, permissions, and deployment direction.
 
@@ -71,7 +71,8 @@ PropelAuth credentials in development mode is rejected to prevent accidental byp
    (do not alternate with `localhost`).
 2. Enable the desired login methods and invite users into organizations. The UI
    uses PropelAuth-hosted login, returns to the original canvas link, and offers
-   an org selector and sign-out. Users with no org see an invitation message.
+   the organization name and sign-out. Users with no org see an invitation message.
+   Accounts with multiple orgs show a configuration error, not an org switcher.
 3. Provide runtime environment variables, then run `pnpm dev` or the built server:
 
    ```sh
@@ -87,11 +88,11 @@ Auth URL from `/api/auth/config`, so images do not need rebuilding for each
 environment. `pnpm dev` loads these variables from `.env` when present. For other
 commands, export/inject them or use Node's `--env-file=.env` option.
 
-API requests send `Authorization: Bearer <access-token>`. List/create requests
-also select an org with `X-Organization-Id` (optional for users with exactly one
-org). Canvas-specific requests resolve the canvas's own org after access checks,
-so deep links work even when another org is selected. Identity always comes from
-the validated token. Org membership and enabled/unlocked account status are
+API requests send `Authorization: Bearer <access-token>`. The server derives the
+organization from the user's sole current membership; no organization-selection
+header or browser preference is used. Zero or multiple memberships deny canvas
+access. Deep links use the same organization and canvas access checks.
+Identity always comes from the validated token. Org membership and enabled/unlocked account status are
 checked against PropelAuth on every HTTP request and ticket issuance; auth
 service failures deny access. This deliberately trades an extra network call for
 fresh authorization. Private canvases remain creator-only within their org.
@@ -114,7 +115,7 @@ stop live editing; export unsaved work before reloading/signing in again.
 
 In production, use HTTPS/WSS behind a trusted reverse proxy. Preserve the public
 `Host` header and support WebSocket upgrades; forwarded headers are not trusted.
-Only the configured `PUBLIC_URL` origin/host is accepted for API calls and upgrades.
+Only the configured `PUBLIC_URL` origin/host is accepted for web API calls and upgrades.
 Cross-site top-level HTML navigation is allowed so hosted login can return to the app.
 Health probes must use that public Host header too. `--allow-local` is for
 unauthenticated development only. Do not publish Vite in production.
@@ -125,8 +126,9 @@ Back up the database before any deliberate ownership migration.
 
 ## MCP
 
-Register **http://127.0.0.1:3000/mcp** as a Streamable HTTP MCP server in your
-agent client. Agents can create and edit persistent canvases, arrange drawings,
+Register **`${PUBLIC_URL}/mcp`** as a Streamable HTTP MCP server in your
+agent client (`http://127.0.0.1:5173/mcp` for authenticated development).
+Agents can create and edit persistent canvases, arrange drawings,
 and export scenes or headless PNG/SVG images. Open a canvas's returned browser
 URL to watch edits live.
 
@@ -140,8 +142,73 @@ on disconnect, without changing the saved canvas or its revision.
 address with `--allow-local`), port 3000 by default in production. Standard
 development and build commands prepare the headless renderer automatically.
 
-**MCP has no OAuth integration yet. Keep it local-only.** In PropelAuth mode,
-`/mcp` returns `503` rather than accepting browser tokens or bypassing login.
+### MCP OAuth setup
+
+1. Enable MCP for the same PropelAuth project/environment used for browser login.
+2. In **MCP → Request Validation**, create a client ID/secret pair and put both
+   in `.env` (or injected runtime secrets):
+
+   ```dotenv
+   PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID=...
+   PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET=...
+   ```
+
+   These are **not** the backend API key or the MCP client's own OAuth credentials.
+   Partial pairs fail startup. If neither is supplied, the browser still works
+   but MCP and its discovery routes return `503`; they never fall back to no auth.
+3. Configure the allowed MCP client's callback URI in PropelAuth. Enable the
+   client-registration method it supports (for example DCR), or use a pre-registered
+   OAuth client. PropelAuth handles registration, login/consent, PKCE and tokens;
+   Excalibur does not host its own authorization server or rewrite its issuer.
+4. Restart `pnpm dev`, connect the client to `${PUBLIC_URL}/mcp`, and authorize it
+   through PropelAuth. No custom OAuth scope or role permission is required.
+
+The canonical resource/audience is exactly `${PUBLIC_URL}/mcp`, not the backend
+listener address or a canvas URL. In development, Vite proxies MCP and discovery
+on port 5173, preserving the public Host. Do not connect an authenticated client
+directly to port 3000 when `PUBLIC_URL` uses 5173. In production, use the public
+HTTPS origin behind the same trusted proxy as the web UI.
+
+Public, credential-free resource discovery is available at
+`/.well-known/oauth-protected-resource/mcp` (and the root alias
+`/.well-known/oauth-protected-resource`). It advertises the PropelAuth
+`{AUTH_URL}/oauth/2.1` authorization server, no required scopes, and header-only
+bearer tokens. Unauthenticated MCP requests return `401` with a
+`WWW-Authenticate` challenge pointing to that document. Authorization-server
+metadata is served by PropelAuth at
+`{AUTH_URL}/.well-known/oauth-authorization-server/oauth/2.1`.
+
+Every MCP exchange introspects its OAuth access token, checks active state,
+expiry, exact resource audience and trusted PropelAuth issuer, then fetches the
+current user's enabled/unlocked status and org memberships. Tokens are not cached.
+Provider outages or invalid introspection credentials return `503` without
+exposing upstream details. Browser JWTs, cookies, query tokens, API keys and
+service identities are not alternative MCP authentication paths.
+
+The token's `sub` is the creator of canvases made by an agent. Each MCP user must
+belong to exactly one current organization, which the server resolves automatically.
+Users with zero or multiple orgs are rejected. If the token includes `org_id`, it
+must match that organization. There are no org-selection headers or tools. Private
+canvases remain creator-only; all canvas reads, edits, comments, assets and renders
+use the existing shared access checks.
+
+Authenticated MCP accepts any `Origin` (or no `Origin`) and serves protocol and
+discovery responses with `Access-Control-Allow-Origin: *`. Bearer tokens are still
+required; browser cookies are not used and credentialed CORS is not enabled.
+Public Host validation remains in place. This does not relax the same-origin policy
+on the web API or WebSockets, or the safeguards for unauthenticated local development.
+Include `WWW-Authenticate` in any proxy response-header
+allowlist and never log Authorization headers or introspection request bodies.
+
+For a quick check, public discovery must return `200` and an unauthenticated
+`POST /mcp` must return `401`. Then verify real login/consent in your target MCP
+client, create a canvas, and open its returned URL as the same user to watch live
+edits. The test suite covers the SDK discovery/DCR/PKCE/code exchange against a
+simulated issuer and authenticated MCP-to-browser editing; real hosted consent
+requires your dashboard setup and is a separate acceptance check.
+
+`AUTH_MODE=development` retains the unauthenticated local-only MCP endpoint at
+`http://127.0.0.1:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
 
 ## Pinned comments
 

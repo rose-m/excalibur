@@ -9,26 +9,31 @@ export type Principal = Readonly<{
 export type Authentication = {
   authUrl: string;
   authenticate: (authorization: string | undefined) => Promise<Principal>;
+  getPrincipal: (userId: string) => Promise<Principal>;
 };
 
 export function propelAuthentication(authUrl: string, apiKey: string): Authentication {
   const auth = initBaseAuth({ authUrl, apiKey });
+  async function getPrincipal(userId: string): Promise<Principal> {
+    // JWT organization claims can be stale. Check current account eligibility
+    // and membership for browser requests, live tickets and MCP exchanges.
+    let current;
+    try { current = await auth.fetchUserMetadataByUserId(userId, true); }
+    catch { throw new ServiceError(503, "Authentication service unavailable"); }
+    if (!current || current.userId !== userId || !current.enabled || current.locked) throw new ServiceError(401, "Account unavailable");
+    return {
+      userId,
+      organizations: Object.entries(current.orgIdToOrgInfo ?? {}).map(([id, org]) => ({ id, name: org.orgName })),
+    };
+  }
   return {
     authUrl,
+    getPrincipal,
     async authenticate(authorization) {
       let user;
       try { user = await auth.validateAccessTokenAndGetUserClass(authorization); }
       catch { throw new ServiceError(401, "Please sign in again"); }
-      // JWT organization claims can be stale. Check current membership on every
-      // HTTP request and ticket issuance; never fall back to claims on failure.
-      let current;
-      try { current = await auth.fetchUserMetadataByUserId(user.userId, true); }
-      catch { throw new ServiceError(503, "Authentication service unavailable"); }
-      if (!current || !current.enabled || current.locked) throw new ServiceError(401, "Account unavailable");
-      return {
-        userId: user.userId,
-        organizations: Object.entries(current.orgIdToOrgInfo ?? {}).map(([id, org]) => ({ id, name: org.orgName })),
-      };
+      return getPrincipal(user.userId);
     },
   };
 }

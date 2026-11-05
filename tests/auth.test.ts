@@ -36,13 +36,19 @@ test("connection tickets expire, are single-use and bind canvas, organization, u
 
 function authentication() {
   const principals: Record<string, Principal> = {
-    alice: { userId: "alice", organizations: [{ id: "org-a", name: "A" }, { id: "org-b", name: "B" }] },
+    alice: { userId: "alice", organizations: [{ id: "org-a", name: "A" }] },
+    multi: { userId: "multi", organizations: [{ id: "org-a", name: "A" }, { id: "org-b", name: "B" }] },
     bob: { userId: "bob", organizations: [{ id: "org-a", name: "A" }] },
     outsider: { userId: "outsider", organizations: [{ id: "org-c", name: "C" }] },
     noorg: { userId: "noorg", organizations: [] },
   };
   const auth: Authentication = {
     authUrl: "https://auth.example",
+    async getPrincipal(userId) {
+      const principal = principals[userId];
+      if (!principal) throw new ServiceError(401, "Account unavailable");
+      return principal;
+    },
     async authenticate(header) {
       const principal = principals[header?.replace(/^Bearer /, "") ?? ""];
       if (!principal) throw new ServiceError(401, "Please sign in again");
@@ -73,18 +79,20 @@ test("authenticated HTTP enforces identity, current org membership, private acce
     assert.deepEqual(await (await request("/api/auth/config")).json(), { mode: "propelauth", authUrl: auth.authUrl });
     assert.equal((await request("/api/canvases")).status, 401);
     assert.equal((await request("/api/canvases", "expired")).status, 401);
-    assert.equal((await request("/api/canvases", "alice")).status, 403, "multi-org requests require an explicit choice");
+    assert.equal((await request("/api/canvases", "alice")).status, 200, "the user's org is resolved without a selection header");
+    assert.equal((await request("/api/canvases", "multi", { headers: { "x-organization-id": "org-a" } })).status, 403, "headers cannot enable multi-org access");
     assert.equal((await request("/api/auth/me", "noorg")).status, 200);
     assert.equal((await request("/api/canvases", "noorg")).status, 403);
-    assert.equal((await request("/api/canvases", "alice", { headers: { "x-organization-id": "org-c" } })).status, 403);
+    assert.equal((await request("/api/canvases", "alice", { headers: { "x-organization-id": "org-c" } })).status, 200, "org-selection headers are ignored");
     const created = await request("/api/canvases", "alice", {
-      method: "POST", headers: { "content-type": "application/json", "x-organization-id": "org-a" }, body: JSON.stringify({ title: "Private" }),
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Private" }),
     });
     assert.equal(created.status, 201);
     const canvas = await created.json() as CanvasDocument;
     assert.equal(canvas.creatorUserId, "alice");
     assert.equal(canvas.organizationId, "org-a");
-    assert.equal((await request(`/api/canvases/${canvas.id}`, "alice", { headers: { "x-organization-id": "org-b" } })).status, 200, "deep links resolve their own org");
+    assert.equal((await request(`/api/canvases/${canvas.id}`, "alice", { headers: { "x-organization-id": "org-b" } })).status, 200, "headers cannot change the user's org");
+    assert.equal((await request(`/api/canvases/${canvas.id}`, "multi")).status, 403);
     for (const user of ["bob", "outsider"]) {
       assert.equal((await request(`/api/canvases/${canvas.id}`, user)).status, 404);
       assert.equal((await request(`/api/canvases/${canvas.id}/comments`, user)).status, 404);

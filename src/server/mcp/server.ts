@@ -31,7 +31,7 @@ function result(value: Record<string, unknown>): CallToolResult {
 export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingService, headless: HeadlessService, context: OperationContext, publicUrl: string, localOrigins?: ReadonlySet<string>) {
   const server = new McpServer({ name: "excalibur", version: "0.0.0" }, {
     capabilities: { tools: {} },
-    instructions: "All canvas tools require an explicit canvasId or application canvas URL. Create a canvas deliberately once, keep its returned ID, and reuse it after reconnects. Drawing helpers generate native Excalidraw elements, labels and bindings. Batch edits commit atomically and publish live updates. Read revision before read–modify–write and pass expectedRevision to reject stale edits. There is no global current canvas. This development endpoint has no authentication and must remain local-only.",
+    instructions: "All canvas tools require an explicit canvasId or application canvas URL. Create a canvas deliberately once, keep its returned ID, and reuse it after reconnects. Drawing helpers generate native Excalidraw elements, labels and bindings. Batch edits commit atomically and publish live updates. Read revision before read–modify–write and pass expectedRevision to reject stale edits. There is no global current canvas. Tools act as the authenticated user within that user's organization; private canvases remain creator-only.",
   });
   function tool<T extends z.ZodType>(name: string, description: string, schema: T,
     run: (args: z.output<T>, signal: AbortSignal) => Promise<CallToolResult> | CallToolResult, readOnly = false, destructive = false) {

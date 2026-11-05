@@ -11,35 +11,21 @@ function SignedInApp() {
   const token = useRef(auth.accessToken);
   token.current = auth.accessToken;
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>();
-  const [selected, setSelected] = useState("");
   const [error, setError] = useState("");
-  const organization = useRef(selected);
-  organization.current = selected;
   useEffect(() => {
     let active = true;
-    configureApi(() => ({ token: token.current ?? "", organizationId: organization.current }));
+    configureApi(() => ({ token: token.current ?? "" }));
     api.me().then(principal => {
       if (!active) return;
       setOrganizations(principal.organizations);
-      const saved = localStorage.getItem(`excalibur:org:${principal.userId}`);
-      setSelected(principal.organizations.find(org => org.id === saved)?.id ?? principal.organizations[0]?.id ?? "");
     }).catch((error: Error) => { if (active) setError(error.message); });
     return () => { active = false; configureApi(); };
   }, [auth.user?.userId]);
 
-  function select(id: string) {
-    // A full navigation uses the editor's beforeunload protection for unsaved edits.
-    if (!window.confirm("Switch organization? Export any unsaved drawing before continuing.")) return;
-    localStorage.setItem(`excalibur:org:${auth.user!.userId}`, id);
-    window.location.assign("/");
-  }
-
   return <div className="authenticated-app">
     <header className="auth-header">
       <span>{auth.user?.email}</span>
-      {organizations && organizations.length > 0 && <label>Organization <select value={selected} onChange={event => select(event.target.value)}>
-        {organizations.map(org => <option key={org.id} value={org.id}>{org.name}</option>)}
-      </select></label>}
+      {organizations?.length === 1 && <span>{organizations[0]!.name}</span>}
       <button onClick={() => {
         if (window.confirm("Sign out? Export any unsaved drawing before continuing.")) void logout(true);
       }}>Sign out</button>
@@ -47,6 +33,7 @@ function SignedInApp() {
     {error ? <main className="canvas-list" role="alert">{error} <a href="/">Try again</a></main> :
       !organizations ? <main className="canvas-list" role="status">Loading your account…</main> :
       organizations.length === 0 ? <main className="canvas-list"><h1>No organization access</h1><p>Ask your administrator for an organization invitation.</p></main> :
+      organizations.length > 1 ? <main className="canvas-list" role="alert"><h1>Account configuration required</h1><p>Your account must belong to exactly one organization. Contact your administrator.</p></main> :
       <App authenticated />}
   </div>;
 }

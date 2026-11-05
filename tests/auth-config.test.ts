@@ -6,7 +6,7 @@ import { devEnvironment } from "../scripts/dev.js";
 test("authentication configuration fails closed and requires explicit development opt-out", () => {
   function load(values: Record<string, string> = {}) {
     const env = { ...process.env };
-    for (const key of ["AUTH_MODE", "PROPELAUTH_AUTH_URL", "PROPELAUTH_API_KEY", "EXCALIBUR_ALLOW_LOCAL", "PUBLIC_URL", "PORT"]) delete env[key];
+    for (const key of ["AUTH_MODE", "PROPELAUTH_AUTH_URL", "PROPELAUTH_API_KEY", "PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID", "PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET", "EXCALIBUR_ALLOW_LOCAL", "PUBLIC_URL", "PORT"]) delete env[key];
     return spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", "import { config } from './src/server/config.ts'; console.log(config.authMode)"], {
       env: { ...env, ...values }, encoding: "utf8",
     });
@@ -20,6 +20,11 @@ test("authentication configuration fails closed and requires explicit developmen
   assert.notEqual(load({ ...credentials, AUTH_MODE: "development" }).status, 0);
   assert.notEqual(load({ ...credentials, EXCALIBUR_ALLOW_LOCAL: "1" }).status, 0);
   assert.notEqual(load({ ...credentials, PROPELAUTH_AUTH_URL: "http://auth.example" }).status, 0);
+  assert.notEqual(load({ ...credentials, PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID: "id" }).status, 0);
+  assert.notEqual(load({ ...credentials, PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET: "secret" }).status, 0);
+  const mcpCredentials = { PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID: "id", PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET: "secret" };
+  assert.equal(load({ ...credentials, ...mcpCredentials }).status, 0);
+  assert.notEqual(load({ ...mcpCredentials, AUTH_MODE: "development" }).status, 0);
   assert.equal(devEnvironment([], {}).AUTH_MODE, "development");
   assert.equal(devEnvironment([], credentials).AUTH_MODE, "propelauth");
 });

@@ -12,12 +12,16 @@ import { createMcpRoutes } from "../mcp/route.js";
 import type { Authentication } from "../auth/propelauth.js";
 import { ConnectionTickets } from "../auth/tickets.js";
 import { ServiceError } from "../canvas/errors.js";
+import type { McpAuthentication } from "../auth/mcp.js";
+import { createMcpSecurity, isMcpEndpoint, isMcpMetadataEndpoint } from "../mcp/security.js";
 
-export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`, network: { allowLocal?: boolean; localAddresses?: string[] } = {}, authentication?: Authentication) {
+export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`, network: { allowLocal?: boolean; localAddresses?: string[] } = {}, authentication?: Authentication, mcpAuthentication?: McpAuthentication) {
+  if (mcpAuthentication && !authentication) throw new Error("MCP OAuth requires authenticated mode");
   const app = new Hono<HttpEnv>();
   const policy = localRequestPolicy(port, network.allowLocal, network.localAddresses);
   const mcp = createMcpRoutes(service, publicUrl, network.allowLocal ? policy.origins : undefined);
   const tickets = new ConnectionTickets();
+  const mcpSecurity = mcpAuthentication ? createMcpSecurity(mcpAuthentication, publicUrl) : undefined;
 
   app.use("*", async (c, next) => {
     c.header("X-Content-Type-Options", "nosniff");
@@ -26,6 +30,9 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
     await next();
   });
   app.use("*", authentication ? async (c, next) => {
+    // Keep Host validation for MCP and public metadata too (DNS rebinding).
+    if (c.req.header("host") !== new URL(publicUrl).host) throw new ServiceError(403, "Host not allowed");
+    if (isMcpEndpoint(c.req.path) || isMcpMetadataEndpoint(c.req.path)) return next();
     const origin = c.req.header("origin");
     // Hosted login returns via a cross-site top-level GET. Only the public HTML
     // shell permits that navigation; API calls and upgrades remain same-origin.
@@ -36,13 +43,13 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
       throw new ServiceError(403, "Origin not allowed");
     }
     // Do not trust forwarded headers; the proxy must preserve the public Host.
-    if (c.req.header("host") !== new URL(publicUrl).host) throw new ServiceError(403, "Host not allowed");
     await next();
   } : localRequestsOnly(port, policy));
   app.use("*", async (c, next) => {
     if (!authentication) c.set("context", developmentContext);
-    else if (c.req.path === "/mcp" || c.req.path.startsWith("/mcp/")) {
-      throw new ServiceError(503, "MCP authentication is not configured");
+    else if (isMcpEndpoint(c.req.path) || isMcpMetadataEndpoint(c.req.path)) {
+      if (!mcpSecurity) throw new ServiceError(503, "MCP authentication is not configured");
+      return mcpSecurity(c, next);
     } else if (c.req.path.startsWith("/api/") && c.req.path !== "/api/auth/config") {
       const match = /^\/api\/canvases\/([^/]+)(?:\/(.*))?$/.exec(c.req.path);
       const canvasId = match ? decodeURIComponent(match[1]!) : undefined;
@@ -57,18 +64,8 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
           if (c.req.method !== "GET") throw new ServiceError(405, "Method not allowed");
           return c.json(principal);
         }
-        let organizationId = c.req.header("x-organization-id");
-        if (canvasId) {
-          // A deep link resolves its own organization, not a tab's selected org.
-          organizationId = principal.organizations.find(org => {
-            try { service.get({ userId: principal.userId, organizationId: org.id }, canvasId); return true; }
-            catch (error) { if (error instanceof ServiceError && error.status === 404) return false; throw error; }
-          })?.id;
-          if (!organizationId) throw new ServiceError(404, "Canvas not found");
-        } else if (!organizationId && principal.organizations.length === 1) organizationId = principal.organizations[0]!.id;
-        if (!organizationId || !principal.organizations.some(org => org.id === organizationId)) {
-          throw new ServiceError(403, "Select an organization you belong to");
-        }
+        if (principal.organizations.length !== 1) throw new ServiceError(403, "Access requires exactly one organization");
+        const organizationId = principal.organizations[0]!.id;
         c.set("context", { userId: principal.userId, organizationId });
       }
     }

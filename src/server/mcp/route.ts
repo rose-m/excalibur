@@ -17,7 +17,13 @@ export function createMcpRoutes(canvases: CanvasService, publicUrl: string, loca
     const handler = createMcpHandler(() => createCanvasMcpServer(canvases, drawing, headless, c.get("context"), publicUrl, localOrigins), {
       legacy: "stateless", maxRequestBodySize: 24 * 1024 * 1024,
     });
-    try { return await handler.fetch(c.req.raw); }
+    try {
+      const response = await handler.fetch(c.req.raw);
+      // Keep the Hono security/CORS headers on SDK-generated protocol responses.
+      const secured = c.newResponse(response.body, response);
+      secured.headers.set("Cache-Control", "no-store, no-transform");
+      return secured;
+    }
     finally { await handler.close(); }
   });
   return { routes, close: () => headless.close() };

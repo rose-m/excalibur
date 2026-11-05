@@ -6,11 +6,16 @@ import { SqliteCanvasRepository } from "./persistence/sqlite.js";
 import { createLiveServer } from "./live/server.js";
 import { localAddresses } from "./local-network.js";
 import { propelAuthentication } from "./auth/propelauth.js";
+import { propelMcpAuthentication } from "./auth/mcp.js";
 
 const repository = new SqliteCanvasRepository(config.databasePath);
 const service = new CanvasService(repository);
 const authentication = config.authMode === "propelauth" ? propelAuthentication(config.authUrl!, config.apiKey!) : undefined;
-const app = createApp(service, config.webDirectory, config.port, config.publicUrl, { allowLocal: config.allowLocal }, authentication);
+const mcpAuthentication = authentication && config.mcpClientId && config.mcpClientSecret ? propelMcpAuthentication({
+  authUrl: authentication.authUrl, resource: `${config.publicUrl}/mcp`,
+  clientId: config.mcpClientId, clientSecret: config.mcpClientSecret, getPrincipal: authentication.getPrincipal,
+}) : undefined;
+const app = createApp(service, config.webDirectory, config.port, config.publicUrl, { allowLocal: config.allowLocal }, authentication, mcpAuthentication);
 const liveServer = createLiveServer();
 const server = serve({
   fetch: app.fetch,
@@ -21,6 +26,7 @@ const server = serve({
 }, () => {
   console.log(`Excalibur listening on http://${config.host}:${config.port}`);
   if (!authentication) console.warn("Authentication is disabled. Local development only; do not expose this service publicly.");
+  else if (!mcpAuthentication) console.warn("MCP is disabled: configure both PropelAuth MCP Request Validation credentials to enable it.");
   if (config.allowLocal) {
     console.warn("LAN access is enabled. Anyone who can reach this server can read and edit canvases, including through MCP. Use a trusted network only.");
     for (const address of localAddresses()) console.log(`LAN: http://${address}:${config.port}`);

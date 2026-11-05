@@ -7,6 +7,10 @@ const authMode = process.env.AUTH_MODE ?? "propelauth";
 if (authMode !== "development" && authMode !== "propelauth") throw new Error("AUTH_MODE must be development or propelauth");
 const authUrl = process.env.PROPELAUTH_AUTH_URL;
 const apiKey = process.env.PROPELAUTH_API_KEY;
+const mcpClientId = process.env.PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID || undefined;
+const mcpClientSecret = process.env.PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET || undefined;
+if (Boolean(mcpClientId) !== Boolean(mcpClientSecret)) throw new Error("Both MCP Request Validation credentials must be set together");
+if (authMode === "development" && (mcpClientId || mcpClientSecret)) throw new Error("MCP OAuth credentials require AUTH_MODE=propelauth");
 if (authMode === "propelauth") {
   if (!authUrl || !apiKey) throw new Error("PROPELAUTH_AUTH_URL and PROPELAUTH_API_KEY are required");
   const url = new URL(authUrl);
@@ -27,6 +31,8 @@ export const config = {
   authMode,
   authUrl,
   apiKey,
+  mcpClientId,
+  mcpClientSecret,
   host: allowLocal ? "0.0.0.0" : process.env.HOST ?? "127.0.0.1",
   allowLocal,
   port,
