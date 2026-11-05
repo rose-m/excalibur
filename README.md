@@ -160,8 +160,12 @@ development and build commands prepare the headless renderer automatically.
    client-registration method it supports (for example DCR), or use a pre-registered
    OAuth client. PropelAuth handles registration, login/consent, PKCE and tokens;
    Excalibur does not host its own authorization server or rewrite its issuer.
-4. Restart `pnpm dev`, connect the client to `${PUBLIC_URL}/mcp`, and authorize it
-   through PropelAuth. No custom OAuth scope or role permission is required.
+4. In **MCP → Org Scopes**, create `canvases:access` and make it available to the
+   organization roles that should use Excalibur. This must be an **organization**
+   scope, not a user scope, so hosted consent selects an organization.
+5. Restart `pnpm dev`, connect the client to `${PUBLIC_URL}/mcp`, and authorize it
+   through PropelAuth. Select the organization and grant `canvases:access`.
+   Existing clients must reauthorize; old unscoped tokens no longer work.
 
 The canonical resource/audience is exactly `${PUBLIC_URL}/mcp`, not the backend
 listener address or a canvas URL. In development, Vite proxies MCP and discovery
@@ -172,7 +176,7 @@ HTTPS origin behind the same trusted proxy as the web UI.
 Public, credential-free resource discovery is available at
 `/.well-known/oauth-protected-resource/mcp` (and the root alias
 `/.well-known/oauth-protected-resource`). It advertises the PropelAuth
-`{AUTH_URL}/oauth/2.1` authorization server, no required scopes, and header-only
+`{AUTH_URL}/oauth/2.1` authorization server, the `canvases:access` scope, and header-only
 bearer tokens. Unauthenticated MCP requests return `401` with a
 `WWW-Authenticate` challenge pointing to that document. Authorization-server
 metadata is served by PropelAuth at
@@ -185,12 +189,24 @@ Provider outages or invalid introspection credentials return `503` without
 exposing upstream details. Browser JWTs, cookies, query tokens, API keys and
 service identities are not alternative MCP authentication paths.
 
-The token's `sub` is the creator of canvases made by an agent. Each MCP user must
-belong to exactly one current organization, which the server resolves automatically.
-Users with zero or multiple orgs are rejected. If the token includes `org_id`, it
-must match that organization. There are no org-selection headers or tools. Private
+The token's `sub` is the creator of canvases made by an agent. Each authorization
+is bound to the token's `org_id`, selected during hosted consent. Users may belong
+to multiple organizations, but must still belong to the selected organization.
+Missing org claims are rejected even for single-org users; missing scopes return
+`403 insufficient_scope` with an OAuth challenge. Changing MCP organizations
+requires reauthorization. Browser selections, headers and tool arguments cannot
+override the MCP token's organization. Private
 canvases remain creator-only; all canvas reads, edits, comments, assets and renders
 use the existing shared access checks.
+
+Browser login automatically opens a sole organization, or shows a picker for
+multiple memberships. The selection is remembered per user in this tab's
+`sessionStorage` and validated against current membership on page load. Browser
+API requests send `x-organization-id`; the server checks current membership on
+every request. Switching organizations navigates to the canvas list in a new page,
+closing the old live connection and preserving the editor's unsaved-change prompt.
+This does not switch existing MCP authorizations. When opening an MCP-created
+canvas URL, select the same organization in the browser.
 
 Authenticated MCP accepts any `Origin` (or no `Origin`) and serves protocol and
 discovery responses with `Access-Control-Allow-Origin: *`. Bearer tokens are still

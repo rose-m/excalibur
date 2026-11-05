@@ -80,10 +80,12 @@ test("authenticated HTTP enforces identity, current org membership, private acce
     assert.equal((await request("/api/canvases")).status, 401);
     assert.equal((await request("/api/canvases", "expired")).status, 401);
     assert.equal((await request("/api/canvases", "alice")).status, 200, "the user's org is resolved without a selection header");
-    assert.equal((await request("/api/canvases", "multi", { headers: { "x-organization-id": "org-a" } })).status, 403, "headers cannot enable multi-org access");
+    assert.equal((await request("/api/canvases", "multi")).status, 403, "multi-org users must select an org");
+    assert.equal((await request("/api/canvases", "multi", { headers: { "x-organization-id": "org-a" } })).status, 200);
+    assert.equal((await request("/api/canvases", "multi", { headers: { "x-organization-id": "org-b" } })).status, 200);
     assert.equal((await request("/api/auth/me", "noorg")).status, 200);
     assert.equal((await request("/api/canvases", "noorg")).status, 403);
-    assert.equal((await request("/api/canvases", "alice", { headers: { "x-organization-id": "org-c" } })).status, 200, "org-selection headers are ignored");
+    assert.equal((await request("/api/canvases", "alice", { headers: { "x-organization-id": "org-c" } })).status, 403, "selection requires current membership");
     const created = await request("/api/canvases", "alice", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Private" }),
     });
@@ -91,7 +93,7 @@ test("authenticated HTTP enforces identity, current org membership, private acce
     const canvas = await created.json() as CanvasDocument;
     assert.equal(canvas.creatorUserId, "alice");
     assert.equal(canvas.organizationId, "org-a");
-    assert.equal((await request(`/api/canvases/${canvas.id}`, "alice", { headers: { "x-organization-id": "org-b" } })).status, 200, "headers cannot change the user's org");
+    assert.equal((await request(`/api/canvases/${canvas.id}`, "alice", { headers: { "x-organization-id": "org-b" } })).status, 403);
     assert.equal((await request(`/api/canvases/${canvas.id}`, "multi")).status, 403);
     for (const user of ["bob", "outsider"]) {
       assert.equal((await request(`/api/canvases/${canvas.id}`, user)).status, 404);
@@ -113,6 +115,42 @@ test("authenticated HTTP enforces identity, current org membership, private acce
     principals.alice = { userId: "alice", organizations: [{ id: "org-b", name: "B" }] };
     assert.equal((await request(`/api/canvases/${canvas.id}`, "alice")).status, 404, "even creators lose access when removed from org");
     assert.equal((await request(`/api/canvases/${canvas.id}/live-ticket`, "alice", { method: "POST", headers: { origin } })).status, 404);
+  } finally { await app.closeMcp(); repository.close(); }
+});
+
+test("multi-org browser requests isolate the same user's canvases, comments and live tickets", async () => {
+  const repository = new SqliteCanvasRepository(":memory:");
+  const service = new CanvasService(repository);
+  const { auth, principals } = authentication();
+  const origin = "https://app.example";
+  const app = createApp(service, "dist/web", 3000, origin, {}, auth);
+  const request = (path: string, organizationId: string, init: RequestInit = {}) => app.request(`${origin}${path}`, {
+    ...init, headers: { host: "app.example", origin, authorization: "Bearer multi", "x-organization-id": organizationId, ...init.headers },
+  });
+  try {
+    const canvases: CanvasDocument[] = [];
+    for (const org of ["org-a", "org-b"]) {
+      const response = await request("/api/canvases", org, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: org }),
+      });
+      assert.equal(response.status, 201);
+      const canvas = await response.json() as CanvasDocument;
+      assert.equal(canvas.organizationId, org);
+      assert.equal(canvas.creatorUserId, "multi");
+      canvases.push(canvas);
+    }
+    for (const canvas of canvases) {
+      const other = canvas.organizationId === "org-a" ? "org-b" : "org-a";
+      const listed = await (await request("/api/canvases", canvas.organizationId)).json() as CanvasDocument[];
+      assert.deepEqual(listed.map(item => item.id), [canvas.id]);
+      assert.equal((await request(`/api/canvases/${canvas.id}`, other)).status, 404);
+      assert.equal((await request(`/api/canvases/${canvas.id}/comments`, other)).status, 404);
+      assert.equal((await request(`/api/canvases/${canvas.id}/live-ticket`, other, { method: "POST" })).status, 404);
+      assert.equal((await request(`/api/canvases/${canvas.id}/live-ticket`, canvas.organizationId, { method: "POST" })).status, 201);
+    }
+    principals.multi = { userId: "multi", organizations: [{ id: "org-b", name: "B" }] };
+    assert.equal((await request("/api/canvases", "org-a")).status, 403, "remembered selections cannot retain revoked access");
+    assert.equal((await request("/api/canvases", "org-b")).status, 200);
   } finally { await app.closeMcp(); repository.close(); }
 });
 

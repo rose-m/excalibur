@@ -72,7 +72,7 @@ flowchart TB
 
 ### Web UI
 
-The browser hosts the Excalidraw editor, a canvas list, and canvas creation and visibility controls. The canvas list includes the user's private canvases and organization-visible canvases in the user's sole organization. There is no organization switcher. Accounts with zero or multiple current memberships cannot access canvases.
+The browser hosts the Excalidraw editor, a canvas list, and canvas creation and visibility controls. The canvas list includes the user's private canvases and organization-visible canvases in the selected organization. A sole membership opens automatically; multiple memberships show a picker. Selection is remembered per user and tab and revalidated on load. Every browser API request validates the selected organization against current membership. Accounts with zero memberships cannot access canvases. Switching organizations navigates to a fresh canvas list, closes the previous live connection, and retains the editor's unsaved-change prompt.
 
 The editor loads a canvas snapshot, joins its live room, and sends incremental edits. Viewport, selection, and other local editor state should remain local unless explicitly introduced as a collaboration feature.
 
@@ -88,9 +88,9 @@ The service manages scene mutations, revisions, persistence, and publication of 
 
 The MCP server is available over HTTP rather than requiring a local stdio process. Authentication uses a user authorization flow backed by PropelAuth; agents should never receive the user's password.
 
-The MCP resource is the canonical application origin plus `/mcp`. Public protected-resource metadata advertises PropelAuth's `/oauth/2.1` authorization server. PropelAuth handles client registration, login/consent and token issuance; Excalibur validates access tokens through MCP Request Validation introspection and checks current account eligibility and org membership. Browser login alone does not establish MCP authentication. No custom OAuth scope is required initially.
+The MCP resource is the canonical application origin plus `/mcp`. Public protected-resource metadata advertises PropelAuth's `/oauth/2.1` authorization server and the required `canvases:access` organization scope. PropelAuth handles client registration, login/consent, organization selection and token issuance; Excalibur validates access tokens through MCP Request Validation introspection and checks current account eligibility and org membership. Browser login alone does not establish MCP authentication.
 
-Each MCP user belongs to exactly one current organization. The server resolves it automatically; no org-selection header or tool is required. Zero or multiple memberships fail closed. Any org claim in the token must match the user's organization. See the README for configuration and real-client acceptance checks. The automated suite covers the selected SDK's OAuth flow with a simulated issuer; real hosted consent must also be verified for the target client.
+Each MCP authorization is bound to exactly one organization through the validated token's `org_id`. Users may have multiple memberships; the selected membership must still exist. Missing org claims or the required scope fail closed, even for single-org users. MCP organization changes require reauthorization; browser selection, headers and tools cannot override the token. See the README for dashboard configuration and real-client acceptance checks. The automated suite covers the selected SDK's OAuth flow with a simulated issuer; real hosted consent must also be verified for the target client.
 
 MCP requests carry or resolve an explicit canvas ID. Tools must not depend on a process-global “current canvas.” Creating a canvas returns its ID and browser URL. Reopening by URL resolves the canvas identity and performs the same authorization checks as reopening by ID.
 
@@ -252,4 +252,4 @@ Before implementation, validate:
 2. Excalidraw integration, mutation granularity, conflict handling, and reconnect behavior.
 3. The backend/frontend framework choices and MCP SDK version.
 4. Initial asset limits and rendering resource limits.
-5. User accounts must belong to exactly one organization; multiple memberships are not supported.
+5. Each browser workspace and MCP authorization uses one selected organization; users may belong to multiple organizations.

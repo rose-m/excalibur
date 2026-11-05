@@ -8,7 +8,7 @@ import { auth as authorize, Client, StreamableHTTPClientTransport } from "@model
 import type { OAuthClientProvider, OAuthDiscoveryState, StoredOAuthClientInformation, StoredOAuthTokens } from "@modelcontextprotocol/client";
 import { OAuthError } from "@modelcontextprotocol/server";
 import { WebSocket } from "ws";
-import { propelMcpAuthentication } from "../src/server/auth/mcp.js";
+import { MCP_ORGANIZATION_SCOPE, propelMcpAuthentication } from "../src/server/auth/mcp.js";
 import type { Authentication, Principal } from "../src/server/auth/propelauth.js";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { ServiceError } from "../src/server/canvas/errors.js";
@@ -32,7 +32,7 @@ function fixture(publicUrl = "https://draw.example") {
     charlie: { userId: "charlie", organizations: [{ id: "org-b", name: "B" }] },
   };
   const claims = (changes: Record<string, unknown> = {}) => ({
-    active: true, sub: "alice", org_id: "org-a", client_id: "agent-client", aud: resource,
+    active: true, sub: "alice", org_id: "org-a", scope: MCP_ORGANIZATION_SCOPE, client_id: "agent-client", aud: resource,
     // Live PropelAuth introspection uses a bare project hostname for iss.
     iss: new URL(authUrl).host, exp: now / 1000 + 3600, ...changes,
   });
@@ -131,7 +131,7 @@ test("MCP rechecks token expiry after asynchronous account lookup, including the
       authUrl, resource: "https://draw.example/mcp", clientId: "validation-client", clientSecret: "validation-secret",
       now: () => clock,
       fetch: async () => Response.json({
-        active: true, sub: "alice", client_id: "agent-client", aud: "https://draw.example/mcp",
+        active: true, sub: "alice", org_id: "org-a", scope: MCP_ORGANIZATION_SCOPE, client_id: "agent-client", aud: "https://draw.example/mcp",
         iss: new URL(authUrl).host, exp: start / 1000 + 1,
       }),
       async getPrincipal() {
@@ -148,37 +148,41 @@ test("MCP rechecks token expiry after asynchronous account lookup, including the
   }
 });
 
-test("MCP requires general OAuth authentication, not custom scopes or role permissions", async () => {
+test("MCP requires the organization scope and advertises it in OAuth challenges", async () => {
   const f = fixture();
   try {
     for (const value of [undefined, "", "mcp:tenant", "unrelated"]) {
       f.tokens.noscope = f.claims({ scope: value, users_org_permissions: [] });
-      assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer noscope"), aliceA);
+      const denied = await f.request("/mcp", { headers: { authorization: "Bearer noscope" } });
+      assert.equal(denied.status, 403);
+      assert.match(denied.headers.get("www-authenticate")!, /error="insufficient_scope"/);
+      assert.match(denied.headers.get("www-authenticate")!, /scope="canvases:access"/);
     }
+    f.tokens.scoped = f.claims({ scope: `other ${MCP_ORGANIZATION_SCOPE}`, users_org_permissions: [] });
+    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer scoped"), aliceA);
     const response = await f.request("/mcp", { headers: { origin: "https://inspector.example" } });
     assert.equal(response.status, 401);
-    assert.doesNotMatch(response.headers.get("www-authenticate")!, /scope=/);
+    assert.match(response.headers.get("www-authenticate")!, /scope="canvases:access"/);
     assert.match(response.headers.get("access-control-expose-headers")!, /WWW-Authenticate/);
   } finally { await f.close(); }
 });
 
-test("MCP resolves the user's only org without selection and rejects zero/multiple memberships or mismatched token orgs", async () => {
+test("MCP uses the token-selected org, supports multiple memberships and never guesses missing orgs", async () => {
   const f = fixture();
   try {
     f.tokens["user-only"] = f.claims({ org_id: undefined });
-    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer user-only"), aliceA);
+    await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer user-only"), error => error instanceof OAuthError && error.code === "invalid_token");
     f.tokens.mismatch = f.claims({ org_id: "org-b" });
     await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer mismatch"), /Organization access/);
     f.principals.alice = { userId: "alice", organizations: [{ id: "org-a", name: "A" }, { id: "org-b", name: "B" }] };
-    for (const token of ["user-only", "alice-a"]) {
-      await assert.rejects(() => f.mcpAuthentication.authenticate(`Bearer ${token}`), /exactly one organization/);
-    }
+    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer alice-a"), aliceA);
+    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer mismatch"), { userId: "alice", organizationId: "org-b" });
     f.tokens["single-org"] = f.claims({ sub: "bob", org_id: undefined });
-    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer single-org"), bobA);
+    await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer single-org"), OAuthError);
     f.tokens["single-org-null"] = f.claims({ sub: "bob", org_id: null });
-    assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer single-org-null"), bobA);
+    await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer single-org-null"), OAuthError);
     f.principals.bob = { userId: "bob", organizations: [] };
-    await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer single-org"), /exactly one organization/);
+    await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer bob-a"), /Organization access/);
   } finally { await f.close(); }
 });
 
@@ -220,7 +224,7 @@ test("MCP allows every origin while retaining bearer auth and web API/WebSocket 
       assert.equal(response.headers.get("access-control-allow-origin"), "*");
       assert.equal(response.headers.get("access-control-allow-credentials"), null);
       assert.deepEqual(await response.json(), {
-        resource: f.resource, authorization_servers: [`${authUrl}/oauth/2.1`], scopes_supported: [], bearer_methods_supported: ["header"], resource_name: "Excalibur",
+        resource: f.resource, authorization_servers: [`${authUrl}/oauth/2.1`], scopes_supported: [MCP_ORGANIZATION_SCOPE], bearer_methods_supported: ["header"], resource_name: "Excalibur",
       });
       assert.equal((await f.request(path, { method: "OPTIONS", headers: foreign })).status, 204);
       const head = await f.request(path, { method: "HEAD", headers: foreign });
@@ -282,7 +286,7 @@ test("official SDK performs strict discovery, DCR, PKCE and code exchange agains
     if (url.href === `${authUrl}/.well-known/oauth-authorization-server/oauth/2.1`) return Response.json({
       issuer: `${authUrl}/oauth/2.1`, authorization_endpoint: `${authUrl}/oauth/2.1/authorize`, token_endpoint: `${authUrl}/oauth/2.1/token`,
       registration_endpoint: `${authUrl}/oauth/2.1/register`, response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
-      code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"], scopes_supported: [], authorization_response_iss_parameter_supported: true,
+      code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"], scopes_supported: [MCP_ORGANIZATION_SCOPE], authorization_response_iss_parameter_supported: true,
     });
     if (url.pathname === "/oauth/2.1/register") {
       const registration = JSON.parse(init!.body as string);
@@ -305,7 +309,7 @@ test("official SDK performs strict discovery, DCR, PKCE and code exchange agains
     assert.equal(redirect.origin, authUrl);
     assert.equal(redirect.pathname, "/oauth/2.1/authorize");
     assert.equal(redirect.searchParams.get("resource"), f.resource);
-    assert.equal(redirect.searchParams.has("scope"), false);
+    assert.equal(redirect.searchParams.get("scope"), MCP_ORGANIZATION_SCOPE);
     assert.equal(redirect.searchParams.get("state"), "test-state");
     assert.equal(redirect.searchParams.get("code_challenge_method"), "S256");
     assert.equal(redirect.searchParams.get("code_challenge"), createHash("sha256").update(verifier).digest("base64url"));
@@ -344,14 +348,25 @@ test("official authenticated MCP clients enforce user/org boundaries and edits r
     return client;
   }
   try {
+    f.principals.alice = { userId: "alice", organizations: [{ id: "org-a", name: "A" }, { id: "org-b", name: "B" }] };
+    f.tokens["alice-b"] = f.claims({ org_id: "org-b" });
     const a = await connect("alice-a");
     assert.equal((await a.listTools()).tools.length, 30);
     const created = await a.callTool({ name: "create_canvas", arguments: { title: "Agent private" } });
     assert(!created.isError);
     const canvas = created.structuredContent as { canvasId: string; creatorUserId: string; organizationId: string; url: string };
     assert.equal(canvas.creatorUserId, "alice");
-    assert.equal(canvas.organizationId, "org-a", "the user's organization is resolved automatically");
+    assert.equal(canvas.organizationId, "org-a", "the token selects the organization, not the user's first membership");
     assert.equal(canvas.url, `${publicUrl}/canvases/${canvas.canvasId}`);
+    const aliceB = await connect("alice-b");
+    const createdB = await aliceB.callTool({ name: "create_canvas", arguments: { title: "Alice in B" } });
+    assert(!createdB.isError);
+    const canvasB = createdB.structuredContent as { canvasId: string; organizationId: string };
+    assert.equal(canvasB.organizationId, "org-b");
+    assert((await a.callTool({ name: "get_canvas", arguments: { canvasId: canvasB.canvasId } })).isError);
+    assert((await aliceB.callTool({ name: "get_canvas", arguments: { canvasId: canvas.canvasId } })).isError);
+    const browserB = await f.request("/api/canvases", { headers: { authorization: "Bearer browser-alice", "x-organization-id": "org-b" } });
+    assert.deepEqual((await browserB.json() as { id: string }[]).map(item => item.id), [canvasB.canvasId]);
     const other = f.service.create(charlieB, { title: "Other organization" });
     const bobPrivate = f.service.create(bobA, { title: "Bob private" });
     const bob = await connect("bob-a");
@@ -365,7 +380,7 @@ test("official authenticated MCP clients enforce user/org boundaries and edits r
     const list = await a.callTool({ name: "list_canvases", arguments: {} });
     assert.deepEqual((list.structuredContent as { canvases: { id: string }[] }).canvases.map(item => item.id), [canvas.canvasId]);
     const browser = await f.request(`/api/canvases/${canvas.canvasId}/live-ticket`, {
-      method: "POST", headers: { authorization: "Bearer browser-alice", origin: publicUrl },
+      method: "POST", headers: { authorization: "Bearer browser-alice", "x-organization-id": "org-a", origin: publicUrl },
     });
     assert.equal(browser.status, 201);
     const ticket = (await browser.json() as { ticket: string }).ticket;

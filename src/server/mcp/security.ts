@@ -1,6 +1,7 @@
 import { bearerAuthChallengeResponse, getOAuthProtectedResourceMetadataUrl, OAuthError } from "@modelcontextprotocol/server";
 import { createMiddleware } from "hono/factory";
 import type { McpAuthentication } from "../auth/mcp.js";
+import { MCP_ORGANIZATION_SCOPE } from "../auth/mcp.js";
 import { ServiceError } from "../canvas/errors.js";
 import type { HttpEnv } from "../http/types.js";
 
@@ -16,7 +17,7 @@ export function createMcpSecurity(auth: McpAuthentication, publicUrl: string) {
   const metadata = {
     resource: auth.resource,
     authorization_servers: [auth.authorizationServer],
-    scopes_supported: [],
+    scopes_supported: [MCP_ORGANIZATION_SCOPE],
     bearer_methods_supported: ["header"],
     resource_name: "Excalibur",
   };
@@ -49,7 +50,7 @@ export function createMcpSecurity(auth: McpAuthentication, publicUrl: string) {
     try { c.set("context", await auth.authenticate(c.req.header("authorization"), c.req.raw.signal)); }
     catch (error) {
       if (error instanceof OAuthError) {
-        const response = bearerAuthChallengeResponse(error, { resourceMetadataUrl });
+        const response = bearerAuthChallengeResponse(error, { resourceMetadataUrl, requiredScopes: [MCP_ORGANIZATION_SCOPE] });
         return c.newResponse(response.body, response);
       }
       throw error;

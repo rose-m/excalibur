@@ -4,10 +4,13 @@ import type { OperationContext } from "./context.js";
 import type { Principal } from "./propelauth.js";
 import { ServiceError } from "../canvas/errors.js";
 
+export const MCP_ORGANIZATION_SCOPE = "canvases:access";
+
 const introspectionSchema = z.object({
   active: z.literal(true),
   sub: z.string().min(1),
   org_id: z.string().min(1).nullish(),
+  scope: z.string().optional(),
   client_id: z.string().min(1),
   aud: z.string(),
   iss: z.string(),
@@ -67,6 +70,10 @@ export function propelMcpAuthentication(options: {
       const token = parsed.data;
       if (token.aud !== options.resource || !issuers.has(token.iss)
         || token.exp <= now() / 1000 || (token.nbf !== undefined && token.nbf > now() / 1000)) throw invalid();
+      if (!token.scope?.split(/\s+/).includes(MCP_ORGANIZATION_SCOPE)) {
+        throw new OAuthError(OAuthErrorCode.InsufficientScope, "Authorize canvas access for an organization");
+      }
+      if (!token.org_id) throw invalid();
       let principal: Principal;
       try { principal = await options.getPrincipal(token.sub); }
       catch (error) {
@@ -74,11 +81,10 @@ export function propelMcpAuthentication(options: {
         throw new ServiceError(503, "MCP authentication service unavailable");
       }
       if (principal.userId !== token.sub) throw invalid();
-      // Each user belongs to one organization. Derive it from current membership,
-      // never from a client-selected header or tool argument.
-      if (principal.organizations.length !== 1) throw new ServiceError(403, "MCP access requires exactly one organization");
-      const organizationId = principal.organizations[0]!.id;
-      if (token.org_id && token.org_id !== organizationId) {
+      // Hosted consent binds the token to one org. Current membership must still
+      // permit it; headers, browser selection and tool arguments cannot override it.
+      const organizationId = token.org_id;
+      if (!principal.organizations.some(org => org.id === organizationId)) {
         throw new ServiceError(403, "Organization access is no longer available");
       }
       // Account lookup is asynchronous: do not authorize a token that expired

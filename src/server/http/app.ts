@@ -64,8 +64,10 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
           if (c.req.method !== "GET") throw new ServiceError(405, "Method not allowed");
           return c.json(principal);
         }
-        if (principal.organizations.length !== 1) throw new ServiceError(403, "Access requires exactly one organization");
-        const organizationId = principal.organizations[0]!.id;
+        const organizationId = c.req.header("x-organization-id")
+          ?? (principal.organizations.length === 1 ? principal.organizations[0]!.id : undefined);
+        if (!organizationId) throw new ServiceError(403, "Select an organization to continue");
+        if (!principal.organizations.some(org => org.id === organizationId)) throw new ServiceError(403, "Organization access is no longer available");
         c.set("context", { userId: principal.userId, organizationId });
       }
     }

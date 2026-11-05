@@ -5,7 +5,7 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-let credentials: (() => { token: string }) | undefined;
+let credentials: (() => { token: string; organizationId?: string | undefined }) | undefined;
 export function configureApi(provider?: typeof credentials) { credentials = provider; }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -13,6 +13,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const auth = credentials?.();
   if (auth) {
     headers.set("authorization", `Bearer ${auth.token}`);
+    if (auth.organizationId) headers.set("x-organization-id", auth.organizationId);
   }
   const response = await fetch(path, { ...options, headers });
   const body = await response.json() as T & { error?: string };
