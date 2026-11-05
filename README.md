@@ -1,8 +1,8 @@
 # Excalibur
 
 A persistent Excalidraw service for humans and agents. The local-only React editor
-supports live canvas collaboration with SQLite persistence. Authentication and
-remote MCP are planned, not implemented.
+supports live canvas collaboration with SQLite persistence and a canvas-scoped
+HTTP MCP toolkit. Authentication is deferred; this service is local-only.
 
 See the [high-level design](docs/high-level-design.md) for scope, architecture, permissions, and deployment direction.
 
@@ -28,7 +28,7 @@ to loopback by default and rejects non-local hosts and unrelated browser origins
 These safeguards are not a substitute for authentication.
 
 Configuration is read from environment variables; see `.env.example`. Local
-`.env` files are not automatically loaded. `HOST`, `PORT`, and `DATABASE_PATH` are
+`.env` files are not automatically loaded. `HOST`, `PORT`, `PUBLIC_URL`, and `DATABASE_PATH` are
 supported. Vite's API proxy assumes the default backend port 3000; update
 `vite.config.ts` if changing it.
 
@@ -43,6 +43,23 @@ After building, **http://127.0.0.1:3000** serves both the UI and API. Editor fon
 are copied from the pinned Excalidraw package and served locally. The editor is
 lazy-loaded; its upstream bundle is large and currently triggers Vite's chunk-size
 warning.
+
+## MCP
+
+Register **http://127.0.0.1:3000/mcp** as a Streamable HTTP MCP server in your
+agent client. Agents can create and edit persistent canvases, arrange drawings,
+and export scenes or headless PNG/SVG images. Open a canvas's returned browser
+URL to watch edits live.
+
+Every drawing operation requires an explicit canvas ID or application canvas
+URL; reuse it across reconnects. Edits are atomic and support revision checks.
+The client discovers the available tools and their parameters automatically.
+
+`PUBLIC_URL` controls returned canvas URLs: port 5173 in development, port 3000
+by default in production. Standard development and build commands prepare the
+headless renderer automatically.
+
+**No authentication is enabled. Keep the endpoint local-only.**
 
 ## Persistence and save behavior
 
@@ -87,14 +104,15 @@ accepted from client payloads.
   - `auth/`: operation context and fixed development identity.
   - `canvas/`: shared canvas service and access checks.
   - `http/`: Hono API routes, middleware, and built-web-asset serving.
-  - `live/`: canvas-scoped WebSocket subscriptions and heartbeat/backpressure handling.
+   - `live/`: canvas-scoped WebSocket subscriptions and heartbeat/backpressure handling.
+   - `mcp/`: explicit-canvas HTTP MCP tools and protocol routing.
   - `persistence/`: storage interfaces and SQLite adapter.
   - `render/`: headless rendering.
 - `src/shared/`: transport schemas and shared types.
 - `migrations/`: versioned database migrations.
 - `tests/`: service, persistence, HTTP, WebSocket, and client scene helper tests.
 
-`mcp/` and `render/` remain placeholders. React 18 is used to match the
+React 18 is used to match the
 pinned Excalidraw component's transitive peer dependencies. This is a single
 package, not a pnpm workspace.
 

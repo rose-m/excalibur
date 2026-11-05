@@ -8,9 +8,11 @@ import { createCanvasRoutes } from "./routes/canvases.js";
 import { healthRoutes } from "./routes/health.js";
 import { createWebRoutes } from "./routes/web.js";
 import type { HttpEnv } from "./types.js";
+import { createMcpRoutes } from "../mcp/route.js";
 
-export function createApp(service: CanvasService, webDirectory: string, port: number) {
+export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`) {
   const app = new Hono<HttpEnv>();
+  const mcp = createMcpRoutes(service, publicUrl);
 
   app.use("*", async (c, next) => {
     c.header("X-Content-Type-Options", "nosniff");
@@ -19,7 +21,7 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
     await next();
   });
   app.use("*", localRequestsOnly(port));
-  app.use("/api/*", async (c, next) => {
+  app.use("*", async (c, next) => {
     // Replace this middleware with validated identity/membership later.
     c.set("context", developmentContext);
     await next();
@@ -31,10 +33,11 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
 
   app.route("/health", healthRoutes);
   app.route("/api/canvases", createCanvasRoutes(service));
+  app.route("/mcp", mcp.routes);
   // Unknown API routes must never fall through to static web assets.
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
   app.route("/", createWebRoutes(webDirectory));
   app.onError(handleError);
   app.notFound((c) => c.json({ error: "Not found" }, 404));
-  return app;
+  return Object.assign(app, { closeMcp: mcp.close });
 }

@@ -7,6 +7,7 @@ COPY tsconfig.json ./
 COPY vite.config.ts index.html ./
 COPY src ./src
 COPY scripts ./scripts
+COPY THIRD_PARTY_NOTICES.md ./
 RUN pnpm build
 RUN pnpm prune --prod
 

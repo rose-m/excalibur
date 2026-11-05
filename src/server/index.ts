@@ -7,7 +7,7 @@ import { createLiveServer } from "./live/server.js";
 
 const repository = new SqliteCanvasRepository(config.databasePath);
 const service = new CanvasService(repository);
-const app = createApp(service, config.webDirectory, config.port);
+const app = createApp(service, config.webDirectory, config.port, config.publicUrl);
 const liveServer = createLiveServer();
 const server = serve({
   fetch: app.fetch,
@@ -29,7 +29,7 @@ function shutdown() {
   for (const socket of liveServer.sockets.clients) socket.close(1001, "Server shutting down");
   const socketsClosed = new Promise<void>((resolve) => liveServer.sockets.close(() => resolve()));
   const httpClosed = new Promise<Error | undefined>((resolve) => server.close((error) => resolve(error)));
-  void Promise.all([httpClosed, socketsClosed]).then(([error]) => {
+  void Promise.all([httpClosed, socketsClosed, app.closeMcp()]).then(([error]) => {
     clearTimeout(timeout);
     repository.close();
     if (error) {

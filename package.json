@@ -8,22 +8,27 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "concurrently -k -n server,web \"pnpm dev:server\" \"pnpm dev:web\"",
-    "dev:server": "tsx watch src/server/index.ts",
+    "dev": "pnpm build:headless && concurrently -k -n server,web,headless \"pnpm dev:server\" \"pnpm dev:web\" \"node scripts/build-headless.mjs --watch\"",
+    "dev:server": "PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:5173} tsx watch src/server/index.ts",
     "dev:web": "pnpm assets && vite --host 127.0.0.1 --port 5173 --strictPort",
     "assets": "node scripts/copy-editor-assets.mjs",
-    "build": "pnpm assets && tsc && vite build",
+    "build": "pnpm assets && pnpm build:headless && tsc && vite build",
+    "build:headless": "node scripts/build-headless.mjs",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.tools.json",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "pnpm build:headless && tsx --test tests/*.test.ts"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/jsdom": "21",
     "@types/node": "22",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^6.2.1",
     "concurrently": "^10.0.6",
+    "esbuild": "^0.28.2",
+    "fontkit": "^2.0.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
@@ -31,8 +36,13 @@
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
     "@hono/node-server": "^2.1.6",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@napi-rs/canvas": "^1.1.0",
     "fractional-indexing": "3.2.0",
     "hono": "^4.13.16",
+    "image-size": "^2.0.4",
+    "jsdom": "26",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.22.1",
