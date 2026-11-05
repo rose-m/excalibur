@@ -4,6 +4,8 @@ import { App } from "./App.js";
 import { api, configureApi } from "./api.js";
 import { organizationStorageKey, organizationUrl, selectOrganization } from "./organizations.js";
 import type { Organization } from "./organizations.js";
+import { NavBar } from "./NavBar.js";
+import { AccountMenu } from "./AccountMenu.js";
 
 type AuthConfig = { mode: "development" } | { mode: "propelauth"; authUrl: string };
 
@@ -41,26 +43,19 @@ function SignedInApp() {
     return () => { active = false; configureApi(); };
   }, [auth.user?.userId]);
 
-  return <div className="authenticated-app">
-    <header className="auth-header">
-      <span>{auth.user?.email}</span>
-      {account?.organizationId && <label>Organization <select aria-label="Organization" value={account.organizationId} onChange={event => {
-        // Navigate before changing credentials or storage. If the editor's unsaved
-        // changes prompt is cancelled, the existing workspace remains untouched.
-        window.location.assign(organizationUrl(event.target.value));
-      }}>
-        {account.organizations.map(org => <option key={org.id} value={org.id}>{org.name}</option>)}
-      </select></label>}
-      <button onClick={() => {
-        if (window.confirm("Sign out? Export any unsaved drawing before continuing.")) void logout(true);
-      }}>Sign out</button>
-    </header>
+  const accountControls = <AccountMenu email={auth.user?.email ?? ""} organizations={account?.organizations ?? []}
+    organizationId={account?.organizationId} onSignOut={() => {
+      if (window.confirm("Sign out? Export any unsaved drawing before continuing.")) void logout(true);
+    }} />;
+  if (!error && account?.organizationId) return <App key={`${auth.user?.userId}:${account.organizationId}`} authenticated accountControls={accountControls} />;
+  return <div className="app-shell">
+    <NavBar accountControls={accountControls} />
     {error ? <main className="canvas-list" role="alert">{error} <a href="/">Try again</a></main> :
       !account ? <main className="canvas-list" role="status">Loading your account…</main> :
       account.organizations.length === 0 ? <main className="canvas-list"><h1>No organization access</h1><p>Ask your administrator for an organization invitation.</p></main> :
-      !account.organizationId ? <main className="canvas-list"><h1>Select an organization</h1><p>Choose the workspace you want to open.</p>
+      <main className="canvas-list"><h1>Select an organization</h1><p>Choose the workspace you want to open.</p>
         <ul>{account.organizations.map(org => <li key={org.id}><a href={organizationUrl(org.id, window.location.pathname)}>{org.name}</a></li>)}</ul>
-      </main> : <App key={`${auth.user?.userId}:${account.organizationId}`} authenticated />}
+      </main>}
   </div>;
 }
 

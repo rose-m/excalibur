@@ -9,8 +9,10 @@ import { createLiveEditor } from "./live-editor.js";
 import type { CommentState } from "../shared/comments.js";
 import Comments from "./Comments.js";
 import { api } from "./api.js";
+import type { ReactNode } from "react";
+import { NavBar } from "./NavBar.js";
 
-export default function Editor({ canvas, authenticated = false }: { canvas: CanvasDocument; authenticated?: boolean }) {
+export default function Editor({ canvas, authenticated = false, accountControls }: { canvas: CanvasDocument; authenticated?: boolean; accountControls?: ReactNode }) {
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ ready: false, message: "Connecting…", error: "" });
   const [comments, setComments] = useState<CommentState>({ revision: -1, comments: [] });
@@ -44,12 +46,10 @@ export default function Editor({ canvas, authenticated = false }: { canvas: Canv
   }, [canvas, editor, receiveComments, authenticated]);
 
   return <main className="editor-page">
-    <header className="editor-header">
-      <a href="/">← Canvases</a>
-      <h1>{canvas.title}</h1>
+    <NavBar title={canvas.title} accountControls={accountControls}>
       <span className="save-status" role="status">{status.message}</span>
       <button className="secondary" disabled={!status.ready} onClick={() => live.current?.flush()}>Save now</button>
-    </header>
+    </NavBar>
     {status.error && <div className="save-error" role="alert">
       {status.error} <button onClick={() => window.location.reload()}>Reload canvas (discard unsaved edits)</button>
       <span> You can export your drawing from the editor menu before reloading.</span>

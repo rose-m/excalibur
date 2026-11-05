@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "compilerOptions": { "rootDir": ".", "noEmit": true, "jsx": "react-jsx" },
   "include": ["tests/**/*.ts", "scripts/**/*.ts", "vite.config.ts", "src/server/**/*.ts", "src/shared/**/*.ts"]
 }

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { CanvasDocument, CanvasMetadata } from "../shared/canvas.js";
 import { api } from "./api.js";
+import { NavBar } from "./NavBar.js";
 
 const Editor = lazy(() => import("./Editor.js"));
 
@@ -60,7 +61,7 @@ function CanvasList({ authenticated }: { authenticated: boolean }) {
   </main>;
 }
 
-function CanvasPage({ id, authenticated }: { id: string; authenticated: boolean }) {
+function CanvasPage({ id, authenticated, accountControls }: { id: string; authenticated: boolean; accountControls?: ReactNode }) {
   const [canvas, setCanvas] = useState<CanvasDocument>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -69,17 +70,21 @@ function CanvasPage({ id, authenticated }: { id: string; authenticated: boolean 
       .catch((error: Error) => { if (active) setError(error.message); });
     return () => { active = false; };
   }, [id]);
-  if (error) return <main className="canvas-list"><a href="/">← Canvases</a><p role="alert" className="error">{error}</p></main>;
-  if (!canvas) return <main className="canvas-list" role="status">Loading canvas…</main>;
-  return <Suspense fallback={<main className="canvas-list" role="status">Loading editor…</main>}>
-    <Editor key={canvas.id} canvas={canvas} authenticated={authenticated} />
+  const loading = <><NavBar accountControls={accountControls} /><main className="canvas-list" role="status">Loading canvas…</main></>;
+  if (error) return <><NavBar accountControls={accountControls} /><main className="canvas-list"><p role="alert" className="error">{error}</p></main></>;
+  if (!canvas) return loading;
+  return <Suspense fallback={loading}>
+    <Editor key={canvas.id} canvas={canvas} authenticated={authenticated} accountControls={accountControls} />
   </Suspense>;
 }
 
-export function App({ authenticated = false }: { authenticated?: boolean }) {
+export function App({ authenticated = false, accountControls }: { authenticated?: boolean; accountControls?: ReactNode }) {
   const path = window.location.pathname;
   const match = /^\/canvases\/([a-f0-9-]{36})$/.exec(path);
-  if (match) return <CanvasPage id={match[1]!} authenticated={authenticated} />;
-  if (path === "/") return <CanvasList authenticated={authenticated} />;
-  return <main className="canvas-list"><h1>Page not found</h1><a href="/">Back to canvases</a></main>;
+  return <div className="app-shell">
+    {match ? <CanvasPage id={match[1]!} authenticated={authenticated} accountControls={accountControls} /> : <>
+      <NavBar accountControls={accountControls} />
+      {path === "/" ? <CanvasList authenticated={authenticated} /> : <main className="canvas-list"><h1>Page not found</h1><a href="/">Back to canvases</a></main>}
+    </>}
+  </div>;
 }

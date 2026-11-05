@@ -16,7 +16,7 @@
     "build:headless": "node scripts/build-headless.mjs",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.tools.json",
-    "test": "pnpm build:headless && tsx --test tests/*.test.ts"
+    "test": "pnpm build:headless && tsx --tsconfig tsconfig.web.json --test tests/*.test.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
