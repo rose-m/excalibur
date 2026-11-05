@@ -7,6 +7,7 @@ import type { OperationContext } from "../auth/context.js";
 import type { CanvasRepository } from "../persistence/repository.js";
 import { ServiceError } from "./errors.js";
 import { reconcileElements } from "./reconcile.js";
+import { CommentService } from "./comments.js";
 
 function validateAssets(scene: Scene) {
   if (Buffer.byteLength(JSON.stringify(scene)) > 24 * 1024 * 1024) {
@@ -42,7 +43,10 @@ export class CanvasService {
   // Socket-scoped editor state. Never committed, versioned or broadcast as a
   // scene mutation. New connections (including reconnects) get fresh IDs.
   private editors = new Map<string, Map<string, string[]>>();
-  constructor(private repository: CanvasRepository) {}
+  readonly comments: CommentService;
+  constructor(private repository: CanvasRepository) {
+    this.comments = new CommentService(repository, (context, id) => this.get(context, id));
+  }
 
   list(context: OperationContext) { return this.repository.list(context); }
 

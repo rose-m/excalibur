@@ -1,4 +1,5 @@
 import type { CanvasDocument, CanvasMetadata } from "../shared/canvas.js";
+import type { CanvasComment, CommentState } from "../shared/comments.js";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -17,4 +18,8 @@ export const api = {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
   }),
   get: (id: string) => request<CanvasDocument>(`/api/canvases/${id}`),
+  createComment: (id: string, comment: Omit<CanvasComment, "createdAt">) => request<CommentState>(`/api/canvases/${id}/comments`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(comment),
+  }),
+  resolveComment: (id: string, commentId: string) => request<CommentState>(`/api/canvases/${id}/comments/${commentId}`, { method: "DELETE" }),
 };

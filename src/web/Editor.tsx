@@ -6,10 +6,15 @@ import type { CanvasDocument } from "../shared/canvas.js";
 import { LiveCanvas } from "./live-canvas.js";
 import type { LiveRecovery, LiveStatus } from "./live-canvas.js";
 import { createLiveEditor } from "./live-editor.js";
+import type { CommentState } from "../shared/comments.js";
+import Comments from "./Comments.js";
 
 export default function Editor({ canvas }: { canvas: CanvasDocument }) {
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ ready: false, message: "Connecting…", error: "" });
+  const [comments, setComments] = useState<CommentState>({ revision: -1, comments: [] });
+  const [commentToolbar, setCommentToolbar] = useState<HTMLDivElement | null>(null);
+  const receiveComments = useCallback((next: CommentState) => setComments(current => next.revision < current.revision ? current : next), []);
   const live = useRef<LiveCanvas | null>(null);
   // Keep recovery in a ref so effect replay/Fast Refresh cannot discard it.
   const recovery = useRef<LiveRecovery>();
@@ -22,7 +27,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
 
   useEffect(() => {
     if (!editor) return;
-    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current });
+    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current, onComments: receiveComments });
     live.current = client;
     client.connect();
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -34,7 +39,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
       recovery.current = client.dispose();
       live.current = null;
     };
-  }, [canvas, editor]);
+  }, [canvas, editor, receiveComments]);
 
   return <main className="editor-page">
     <header className="editor-header">
@@ -49,6 +54,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
     </div>}
     <div className="editor-surface">
       <Excalidraw initialData={initialData} excalidrawAPI={setEditor} onChange={onChange}
+        renderTopRightUI={() => <div ref={setCommentToolbar} className="comment-toolbar-slot" />}
         viewModeEnabled={!status.ready} UIOptions={{ canvasActions: { loadScene: false } }}>
         <MainMenu>
           <MainMenu.DefaultItems.Export />
@@ -57,6 +63,7 @@ export default function Editor({ canvas }: { canvas: CanvasDocument }) {
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
       </Excalidraw>
+      {editor && <Comments canvasId={canvas.id} editor={editor} toolbar={commentToolbar} state={comments} ready={status.ready} onUpdate={receiveComments} />}
     </div>
     <footer className="editor-footer">Local development · Live canvas · PNG/JPEG/GIF/WebP images, up to 5 MiB each</footer>
   </main>;

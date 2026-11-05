@@ -5,6 +5,7 @@ import type { ServerMessage } from "../src/shared/live.js";
 import { LiveCanvas } from "../src/web/live-canvas.js";
 import type { LiveRecovery, LiveSocket, LiveStatus } from "../src/web/live-canvas.js";
 import type { LiveEditor } from "../src/web/live-state.js";
+import type { CommentState } from "../src/shared/comments.js";
 
 const white = { viewBackgroundColor: "#fff" };
 const black = { viewBackgroundColor: "#000" };
@@ -80,10 +81,12 @@ function fixture() {
   const editor = new DeferredEditor();
   const sockets: FakeSocket[] = [];
   const statuses: LiveStatus[] = [];
+  const comments: CommentState[] = [];
   const clients: LiveCanvas[] = [];
   function create(recovery?: LiveRecovery) {
     const client = new LiveCanvas(canvas, editor, (status) => statuses.push(status), {
       baseUrl: "http://localhost", recovery,
+      onComments: state => comments.push(state),
       createSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     });
     clients.push(client);
@@ -96,7 +99,7 @@ function fixture() {
   socket.message({ type: "snapshot", canvas });
   editor.applyAll();
   return {
-    canvas, editor, sockets, statuses, client, socket, create,
+    canvas, editor, sockets, statuses, comments, client, socket, create,
     close: () => { for (const item of clients) item.dispose(); },
   };
 }
@@ -128,6 +131,21 @@ test("selection changes publish temporary state without dirtying or mutating the
     replacement.dispose();
     replacement.changed();
     assert.deepEqual(f.sockets[1]!.selections, [["a"]], "disposed clients cannot send selection");
+  } finally { f.close(); }
+});
+
+test("comment broadcasts are separate from scene revisions and ignore stale comment snapshots", () => {
+  const f = fixture();
+  try {
+    f.socket.message({ type: "comments", state: { revision: 2, comments: [] } });
+    f.socket.message({ type: "comments", state: { revision: 1, comments: [] } });
+    assert.deepEqual(f.comments.map(state => state.revision), [0, 2]);
+    f.socket.message({ type: "update", update: update(1, white) });
+    f.editor.applyAll();
+    f.client.flush();
+    assert.deepEqual(f.socket.sent, []);
+    assert.equal(f.client.hasUnsavedChanges(), false);
+    assert.equal(f.statuses.at(-1)?.ready, true);
   } finally { f.close(); }
 });
 

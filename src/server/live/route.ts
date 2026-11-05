@@ -28,8 +28,9 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
     const id = c.req.param("id")!;
     service.get(context, id);
     let unsubscribe = () => {};
+    let unsubscribeComments = () => {};
     let editor: ReturnType<CanvasService["connectEditor"]> | undefined;
-    const cleanup = () => { unsubscribe(); editor?.close(); };
+    const cleanup = () => { unsubscribe(); unsubscribeComments(); editor?.close(); };
     return upgradeWebSocket(() => ({
       onOpen(_event, socket) {
         try {
@@ -37,7 +38,8 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
           // between room registration and the authoritative initial snapshot.
           unsubscribe = service.subscribe(context, id, (update) => send(socket, { type: "update", update }));
           editor = service.connectEditor(context, id);
-          send(socket, { type: "snapshot", canvas: service.get(context, id) });
+          unsubscribeComments = service.comments.subscribe(context, id, state => send(socket, { type: "comments", state }));
+          send(socket, { type: "snapshot", canvas: service.get(context, id), comments: service.comments.get(context, id) });
         } catch { cleanup(); socket.close(1008, "Canvas unavailable"); }
       },
       onMessage(event, socket) {

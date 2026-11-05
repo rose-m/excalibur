@@ -3,6 +3,7 @@ import type { ServerMessage } from "../shared/live.js";
 import { applyUpdate, pendingMutation, SharedSettingsTracker } from "./live-state.js";
 import type { LiveEditor } from "./live-state.js";
 import { requestId } from "./request-id.js";
+import type { CommentState } from "../shared/comments.js";
 
 export type LiveStatus = { ready: boolean; message: string; error: string };
 
@@ -12,6 +13,7 @@ type LiveOptions = {
   baseUrl?: string;
   createSocket?: (url: string) => LiveSocket;
   recovery?: LiveRecovery | undefined;
+  onComments?: (state: CommentState) => void;
 };
 
 export class LiveCanvas {
@@ -31,6 +33,7 @@ export class LiveCanvas {
   private reconnectAttempts = 0;
   private failure = "";
   private selection: string | undefined;
+  private commentsRevision = -1;
 
   constructor(private canvas: CanvasDocument, private editor: LiveEditor,
     private status: (status: LiveStatus) => void, private options: LiveOptions = {}) {
@@ -63,6 +66,7 @@ export class LiveCanvas {
           this.settings = new SharedSettingsTracker(this.editor.read().sharedSettings);
           this.revision = message.canvas.revision;
           this.render(this.known, true);
+          this.receiveComments(message.comments ?? { revision: 0, comments: [] });
           this.ready = true;
           this.selection = undefined;
           this.sendSelection();
@@ -70,6 +74,8 @@ export class LiveCanvas {
           this.reconnectDelay = 400;
           this.reconnectAttempts = 0;
           this.status({ ready: true, message: "Live · Saved", error: "" });
+        } else if (message.type === "comments") {
+          this.receiveComments(message.state);
         } else if (message.type === "update") {
           this.receive(message.update);
         } else if (message.type === "ack") {
@@ -114,6 +120,12 @@ export class LiveCanvas {
       // waiting to apply a remote render. Only changed() records local settings.
       sharedSettings: this.settings.value(this.known.sharedSettings),
     };
+  }
+
+  private receiveComments(state: CommentState) {
+    if (state.revision < this.commentsRevision) return;
+    this.commentsRevision = state.revision;
+    this.options.onComments?.(state);
   }
 
   private render(scene: Scene, replace: boolean) {

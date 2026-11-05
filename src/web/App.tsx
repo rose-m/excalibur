@@ -72,7 +72,7 @@ function CanvasPage({ id }: { id: string }) {
   if (error) return <main className="canvas-list"><a href="/">← Canvases</a><p role="alert" className="error">{error}</p></main>;
   if (!canvas) return <main className="canvas-list" role="status">Loading canvas…</main>;
   return <Suspense fallback={<main className="canvas-list" role="status">Loading editor…</main>}>
-    <Editor canvas={canvas} />
+    <Editor key={canvas.id} canvas={canvas} />
   </Suspense>;
 }
 

@@ -4,6 +4,8 @@ import { dirname, resolve } from "node:path";
 import type { CanvasDocument, CanvasMetadata, SaveScene, Scene } from "../../shared/canvas.js";
 import type { OperationContext } from "../auth/context.js";
 import type { CanvasRepository } from "./repository.js";
+import type { CanvasComment, CommentState } from "../../shared/comments.js";
+import { signature } from "../../shared/signature.js";
 
 type Row = Record<string, unknown>;
 
@@ -109,4 +111,43 @@ export class SqliteCanvasRepository implements CanvasRepository {
   }
 
   close() { this.db.close(); }
+
+  getComments(id: string): CommentState {
+    const row = this.db.prepare("SELECT comments_revision FROM canvases WHERE id = ?").get(id);
+    if (!row) throw new Error("Canvas does not exist");
+    const comments = this.db.prepare("SELECT * FROM comments WHERE canvas_id = ? ORDER BY created_at, id").all(id).map(row => ({
+      id: row.id as string, text: row.text as string, anchor: JSON.parse(row.anchor as string) as CanvasComment["anchor"], createdAt: row.created_at as string,
+    }));
+    return { revision: row.comments_revision as number, comments };
+  }
+
+  addComment(id: string, comment: CanvasComment): CommentState | "limit" | "conflict" {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const state = this.getComments(id);
+      const existing = state.comments.find(item => item.id === comment.id);
+      if (existing) {
+        this.db.exec("COMMIT");
+        return existing.text === comment.text && signature(existing.anchor) === signature(comment.anchor) ? state : "conflict";
+      }
+      if (state.comments.length >= 500) { this.db.exec("ROLLBACK"); return "limit"; }
+      this.db.prepare("INSERT INTO comments (canvas_id, id, text, anchor, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(id, comment.id, comment.text, JSON.stringify(comment.anchor), comment.createdAt);
+      this.db.prepare("UPDATE canvases SET comments_revision = comments_revision + 1 WHERE id = ?").run(id);
+      const result = this.getComments(id);
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  deleteComment(id: string, commentId: string): CommentState {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const deleted = this.db.prepare("DELETE FROM comments WHERE canvas_id = ? AND id = ?").run(id, commentId);
+      if (deleted.changes) this.db.prepare("UPDATE canvases SET comments_revision = comments_revision + 1 WHERE id = ?").run(id);
+      const state = this.getComments(id);
+      this.db.exec("COMMIT");
+      return state;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
 }

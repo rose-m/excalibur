@@ -75,6 +75,15 @@ development and build commands prepare the headless renderer automatically.
 
 **No authentication is enabled. Keep the endpoint local-only.**
 
+## Pinned comments
+
+Use **Comment** beside the drawing toolbar (or press **C** with the editor focused),
+then click an element or blank canvas to leave a note. Element pins follow movement,
+resizing, and rotation. Open a pin
+and choose **Resolve** to delete the note. Comments persist and sync across tabs,
+but stay separate from drawing revisions and Excalidraw/image exports. Deleting
+a drawing element keeps its notes at the element's last retained position.
+
 ## Persistence and save behavior
 
 - Numbered SQL migrations in `migrations/` run transactionally on server startup.
