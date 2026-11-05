@@ -7,6 +7,7 @@ import type { LiveEditor } from "./live-state.js";
 // with an editor which deliberately defers app-state updates, just like React.
 export function createLiveEditor(editor: ExcalidrawImperativeAPI): LiveEditor {
   return {
+    selectedElementIds: () => Object.entries(editor.getAppState().selectedElementIds).filter(([, selected]) => selected).map(([id]) => id),
     read() {
       return {
         elements: editor.getSceneElementsIncludingDeleted() as unknown as Scene["elements"],

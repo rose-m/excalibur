@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createCanvasSchema, mutationSchema, saveSceneSchema, sceneSchema } from "../../shared/canvas.js";
 import type { CanvasDocument, Scene, SceneUpdate } from "../../shared/canvas.js";
 import { signature } from "../../shared/signature.js";
+import { selectedElementIdsSchema } from "../../shared/live.js";
 import type { OperationContext } from "../auth/context.js";
 import type { CanvasRepository } from "../persistence/repository.js";
 import { ServiceError } from "./errors.js";
@@ -38,6 +39,9 @@ function validateAssets(scene: Scene) {
 
 export class CanvasService {
   private listeners = new Map<string, Set<(update: SceneUpdate) => void>>();
+  // Socket-scoped editor state. Never committed, versioned or broadcast as a
+  // scene mutation. New connections (including reconnects) get fresh IDs.
+  private editors = new Map<string, Map<string, string[]>>();
   constructor(private repository: CanvasRepository) {}
 
   list(context: OperationContext) { return this.repository.list(context); }
@@ -127,6 +131,42 @@ export class CanvasService {
       closed = true;
       listeners.delete(listener);
       if (!listeners.size && this.listeners.get(id) === listeners) this.listeners.delete(id);
+    };
+  }
+
+  connectEditor(context: OperationContext, id: string) {
+    this.get(context, id);
+    let editors = this.editors.get(id);
+    if (!editors) { editors = new Map(); this.editors.set(id, editors); }
+    const editorId = randomUUID();
+    editors.set(editorId, []);
+    let closed = false;
+    return {
+      setSelection: (input: unknown) => {
+        if (closed) return;
+        this.get(context, id);
+        editors.set(editorId, [...new Set(selectedElementIdsSchema.parse(input))]);
+      },
+      close: () => {
+        if (closed) return;
+        closed = true;
+        editors.delete(editorId);
+        if (!editors.size && this.editors.get(id) === editors) this.editors.delete(id);
+      },
+    };
+  }
+
+  getSelectedElements(context: OperationContext, id: string) {
+    const canvas = this.get(context, id);
+    const active = new Map(canvas.scene.elements.filter(element => !element.isDeleted).map(element => [element.id, element]));
+    return {
+      revision: canvas.revision,
+      editors: [...(this.editors.get(id) ?? [])].map(([editorId, ids]) => {
+        // Resolve against the current committed scene, not an old element copy.
+        // Deleted, foreign and not-yet-saved elements are never returned.
+        const elements = ids.flatMap(elementId => { const element = active.get(elementId); return element ? [element] : []; });
+        return { editorId, elementIds: elements.map(element => element.id), elements };
+      }),
     };
   }
 }

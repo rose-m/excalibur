@@ -28,14 +28,17 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
     const id = c.req.param("id")!;
     service.get(context, id);
     let unsubscribe = () => {};
+    let editor: ReturnType<CanvasService["connectEditor"]> | undefined;
+    const cleanup = () => { unsubscribe(); editor?.close(); };
     return upgradeWebSocket(() => ({
       onOpen(_event, socket) {
         try {
           // Subscribe and read synchronously: no mutation can land in a gap
           // between room registration and the authoritative initial snapshot.
           unsubscribe = service.subscribe(context, id, (update) => send(socket, { type: "update", update }));
+          editor = service.connectEditor(context, id);
           send(socket, { type: "snapshot", canvas: service.get(context, id) });
-        } catch { unsubscribe(); socket.close(1008, "Canvas unavailable"); }
+        } catch { cleanup(); socket.close(1008, "Canvas unavailable"); }
       },
       onMessage(event, socket) {
         let requestId: string | undefined;
@@ -45,17 +48,18 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
           try { body = JSON.parse(event.data) as unknown; }
           catch { throw new ServiceError(400, "Invalid JSON"); }
           const message = clientMessageSchema.parse(body);
+          if (message.type === "selection") { editor?.setSelection(message.elementIds); return; }
           requestId = message.requestId;
           const update = service.mutate(context, id, message.mutation);
           send(socket, { type: "ack", requestId, update });
         } catch (error) {
           const status = error instanceof ServiceError ? error.status : error instanceof ZodError ? 400 : 500;
           send(socket, { type: "error", ...(requestId ? { requestId } : {}), status,
-            message: error instanceof ServiceError ? error.message : status === 400 ? "Invalid mutation" : "Mutation failed" });
+            message: error instanceof ServiceError ? error.message : status === 400 ? "Invalid live message" : "Live operation failed" });
         }
       },
-      onClose() { unsubscribe(); },
-      onError() { unsubscribe(); },
-    }), { onError: () => { unsubscribe(); } })(c, next);
+      onClose() { cleanup(); },
+      onError() { cleanup(); },
+    }), { onError: cleanup })(c, next);
   };
 }

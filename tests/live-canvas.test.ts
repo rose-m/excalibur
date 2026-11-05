@@ -24,6 +24,8 @@ class DeferredEditor implements LiveEditor {
   scene = blank();
   pendingSettings: Scene["sharedSettings"][] = [];
   changed = () => {};
+  selection: string[] = [];
+  selectedElementIds() { return this.selection; }
   read() { return this.scene; }
   normalize(scene: Scene) { return structuredClone(scene); }
   isInvisiblySmall() { return false; }
@@ -57,7 +59,12 @@ class FakeSocket implements LiveSocket {
   onclose: LiveSocket["onclose"] = null;
   onopen: LiveSocket["onopen"] = null;
   sent: { type: "mutate"; requestId: string; mutation: Mutation }[] = [];
-  send(data: Parameters<LiveSocket["send"]>[0]) { this.sent.push(JSON.parse(data as string)); }
+  selections: string[][] = [];
+  send(data: Parameters<LiveSocket["send"]>[0]) {
+    const message = JSON.parse(data as string);
+    if (message.type === "selection") this.selections.push(message.elementIds);
+    else this.sent.push(message);
+  }
   message(message: ServerMessage) {
     this.onmessage?.call(this as unknown as WebSocket, new MessageEvent("message", { data: JSON.stringify(message) }));
   }
@@ -97,6 +104,32 @@ function fixture() {
 function update(revision: number, sharedSettings = black): SceneUpdate {
   return { revision, elements: [], files: {}, sharedSettings };
 }
+
+test("selection changes publish temporary state without dirtying or mutating the scene", () => {
+  const f = fixture();
+  try {
+    assert.deepEqual(f.socket.selections, [[]], "initial snapshot publishes an empty selection");
+    f.editor.selection = ["b", "a", "a"];
+    f.client.changed();
+    f.client.changed();
+    assert.deepEqual(f.socket.selections, [[], ["a", "b"]], "unchanged selections are deduplicated");
+    f.client.flush();
+    assert.deepEqual(f.socket.sent, []);
+    assert.equal(f.client.hasUnsavedChanges(), false);
+    assert.equal(f.statuses.at(-1)?.message, "Live · Saved");
+    f.editor.selection = [];
+    f.client.changed();
+    assert.deepEqual(f.socket.selections.at(-1), []);
+    f.editor.selection = ["a"];
+    const replacement = f.create(f.client.dispose());
+    assert.deepEqual(f.sockets[1]!.selections, [], "do not publish before a snapshot");
+    f.sockets[1]!.message({ type: "snapshot", canvas: f.canvas });
+    assert.deepEqual(f.sockets[1]!.selections, [["a"]], "a new connection republishes current selection");
+    replacement.dispose();
+    replacement.changed();
+    assert.deepEqual(f.sockets[1]!.selections, [["a"]], "disposed clients cannot send selection");
+  } finally { f.close(); }
+});
 
 test("effect recreation retains unsent scenes and backgrounds across repeated replays", () => {
   const f = fixture();

@@ -29,6 +29,7 @@ export class LiveCanvas {
   private reconnectDelay = 400;
   private reconnectAttempts = 0;
   private failure = "";
+  private selection: string | undefined;
 
   constructor(private canvas: CanvasDocument, private editor: LiveEditor,
     private status: (status: LiveStatus) => void, private options: LiveOptions = {}) {
@@ -62,6 +63,8 @@ export class LiveCanvas {
           this.revision = message.canvas.revision;
           this.render(this.known, true);
           this.ready = true;
+          this.selection = undefined;
+          this.sendSelection();
           this.dirty = false;
           this.reconnectDelay = 400;
           this.reconnectAttempts = 0;
@@ -133,6 +136,7 @@ export class LiveCanvas {
     if (this.blocked || this.stopped) return;
     this.settings.changed(this.editor.read().sharedSettings, this.ready);
     if (!this.ready) return;
+    this.sendSelection();
     if (!this.inFlight) this.settings.settle(this.known.sharedSettings);
     const wasDirty = this.dirty;
     this.dirty = pendingMutation(this.known, this.scene()) !== null;
@@ -143,6 +147,17 @@ export class LiveCanvas {
       clearTimeout(this.timer);
       this.status({ ready: true, message: "Live · Saved", error: "" });
     }
+  }
+
+  private sendSelection() {
+    if (!this.ready || this.stopped || this.blocked || this.socket?.readyState !== 1) return;
+    const elementIds = [...new Set(this.editor.selectedElementIds())].sort();
+    const selection = JSON.stringify(elementIds);
+    if (selection === this.selection) return;
+    try {
+      this.socket.send(JSON.stringify({ type: "selection", elementIds }));
+      this.selection = selection;
+    } catch { this.socket.close(4000, "Could not send selection"); }
   }
 
   private schedule() {

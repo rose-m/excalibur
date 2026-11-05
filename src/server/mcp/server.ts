@@ -95,6 +95,10 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     const canvas = document(args.canvasId);
     return withIdentity(canvas.id, { revision: canvas.revision, element: activeElement(canvas, args.id) });
   }, true);
+  tool("get_selected_elements", "Read temporary selections grouped by connected editor tab. Returns each editorId, selected element IDs and their latest committed native data. An empty editors array means no connected editors; an editor with empty elementIds has no saved elements selected. Editor IDs change on reconnect. Unknown, deleted and unsaved elements are omitted. No global current tab is inferred and no image bytes are included.", z.strictObject({ canvasId: scope.canvasId }), args => {
+    const canvas = id(args.canvasId);
+    return withIdentity(canvas, canvases.getSelectedElements(context, canvas));
+  }, true);
   tool("query_elements", "Query native elements by type, exact field filters, text substring, or origin coordinate range. Deleted elements are excluded by default.", z.strictObject({ canvasId: scope.canvasId, type: z.string().max(40).optional(), text: z.string().max(1000).optional(), filter: z.record(z.string(), z.unknown()).optional(), includeDeleted: z.boolean().default(false), bbox: z.strictObject({ x_min: z.number().optional(), x_max: z.number().optional(), y_min: z.number().optional(), y_max: z.number().optional() }).optional(), limit: z.number().int().min(1).max(1000).default(100), offset: z.number().int().min(0).default(0) }), args => {
     const canvas = document(args.canvasId);
     const matches = canvas.scene.elements.filter(element => {

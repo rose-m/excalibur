@@ -5,6 +5,7 @@ type SharedSettings = Scene["sharedSettings"];
 
 export interface LiveEditor {
   read(): Scene;
+  selectedElementIds(): string[];
   normalize(scene: Scene): Scene;
   render(scene: Scene, replace: boolean): void;
   isInvisiblySmall(element: Scene["elements"][number]): boolean;

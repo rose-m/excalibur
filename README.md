@@ -54,6 +54,8 @@ URL to watch edits live.
 Every drawing operation requires an explicit canvas ID or application canvas
 URL; reuse it across reconnects. Edits are atomic and support revision checks.
 The client discovers the available tools and their parameters automatically.
+Selections are available per connected editor tab; they are temporary and cleared
+on disconnect, without changing the saved canvas or its revision.
 
 `PUBLIC_URL` controls returned canvas URLs: port 5173 in development, port 3000
 by default in production. Standard development and build commands prepare the
