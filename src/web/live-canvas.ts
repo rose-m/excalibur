@@ -1,4 +1,4 @@
-import type { CanvasDocument, Scene, SceneUpdate } from "../shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata, Scene, SceneUpdate } from "../shared/canvas.js";
 import type { ServerMessage } from "../shared/live.js";
 import { applyUpdate, pendingMutation, SharedSettingsTracker } from "./live-state.js";
 import type { LiveEditor } from "./live-state.js";
@@ -14,6 +14,7 @@ type LiveOptions = {
   createSocket?: (url: string) => LiveSocket;
   recovery?: LiveRecovery | undefined;
   onComments?: (state: CommentState) => void;
+  onMetadata?: (metadata: CanvasMetadata) => void;
   getTicket?: (() => Promise<string>) | undefined;
 };
 
@@ -77,6 +78,8 @@ export class LiveCanvas {
           this.revision = message.canvas.revision;
           this.render(this.known, true);
           this.receiveComments(message.comments ?? { revision: 0, comments: [] });
+          const { scene: _scene, ...metadata } = message.canvas;
+          this.options.onMetadata?.(metadata);
           this.ready = true;
           this.selection = undefined;
           this.sendSelection();
@@ -86,6 +89,8 @@ export class LiveCanvas {
           this.status({ ready: true, message: "Live · Saved", error: "" });
         } else if (message.type === "comments") {
           this.receiveComments(message.state);
+        } else if (message.type === "metadata") {
+          this.options.onMetadata?.(message.metadata);
         } else if (message.type === "update") {
           this.receive(message.update);
         } else if (message.type === "ack") {

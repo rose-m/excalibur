@@ -29,6 +29,9 @@ export const api = {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
   }),
   get: (id: string) => request<CanvasDocument>(`/api/canvases/${id}`),
+  setVisibility: (id: string, visibility: CanvasMetadata["visibility"], expectedVisibility: CanvasMetadata["visibility"]) => request<CanvasMetadata>(`/api/canvases/${id}/visibility`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ visibility, expectedVisibility }),
+  }),
   createComment: (id: string, comment: Omit<CanvasComment, "createdAt">) => request<CommentState>(`/api/canvases/${id}/comments`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(comment),
   }),

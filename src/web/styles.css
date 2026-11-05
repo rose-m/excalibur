@@ -56,6 +56,31 @@ button.account-signout { display: flex; align-items: center; gap: 10px; width: 1
 button.account-signout:hover { background: #fff4f3; color: #9b2727; }
 .editor-page { flex: 1; min-height: 0; display: flex; flex-direction: column; background: white; }
 .save-status { color: #706e83; font-size: 13px; white-space: nowrap; }
+.share-trigger { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.sharing-badge { font-size: 11px; color: #79738f; }
+.share-dialog { width: 480px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #e3e1ef; border-radius: 16px; color: #25243c; box-shadow: 0 16px 60px #25243c30; }
+.share-dialog::backdrop { background: #25243c55; }
+.share-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.share-dialog h2 { margin: 0; font-size: 20px; }
+.share-dialog button.share-close { background: transparent; color: #79738f; padding: 0; width: 32px; height: 32px; font-size: 24px; }
+.share-canvas-title { margin: 4px 0 24px; color: #79738f; font-size: 13px; overflow-wrap: anywhere; }
+.share-dialog fieldset { border: 0; padding: 0; margin: 0; }
+.share-dialog legend { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+.share-option { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid #e3e1ef; border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
+.share-option:has(input:checked) { background: #f8f7fd; border-color: #a5a0cf; }
+.share-option input { flex: none; margin: 3px 0 0; accent-color: #5148b8; }
+.share-option strong { display: block; font-size: 14px; margin-bottom: 4px; }
+.share-option span span, .share-notice, .share-link p { display: block; font-size: 12px; line-height: 1.5; color: #79738f; }
+.share-dialog fieldset:disabled .share-option { cursor: default; }
+.share-notice { margin: 12px 0; }
+.share-link { margin-top: 24px; border-top: 1px solid #e3e1ef; padding-top: 16px; }
+.share-link label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+.share-link > div { display: flex; gap: 8px; }
+.share-link input { width: 100%; padding: 8px; font-size: 12px; color: #79738f; }
+.share-link button { white-space: nowrap; }
+.share-link p { margin: 8px 0; }
+.share-link [role="status"] { font-size: 12px; color: #5148b8; }
+.share-dialog-actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .save-error { padding: 10px 20px; font-size: 13px; background: #fff0f0; }
 .save-error button { margin-left: 8px; font-size: 12px; padding: 6px; }
 .editor-surface { flex: 1; min-height: 0; position: relative; }
@@ -69,6 +94,7 @@ button.account-signout:hover { background: #fff4f3; color: #9b2727; }
   .nav-actions { gap: 6px; }
   .app-nav button.secondary { padding: 8px; }
   .save-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .sharing-badge { display: none; }
 }
 .comment-tool { display: flex; align-items: center; gap: 7px; height: 36px; padding: 6px 12px; background: white; color: #5148b8; border: 1px solid #d9d7eb; font-size: 13px; }
 .comment-tool:hover, .comment-tool[aria-pressed="true"] { background: #eeeafb; color: #443ca0; }

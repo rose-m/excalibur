@@ -82,6 +82,8 @@ The shared canvas service is the authoritative application layer for reads and m
 
 Every operation carries an authenticated user, organization context, and explicit canvas ID. Organization IDs and user IDs supplied by clients are not trusted without validating membership and permissions.
 
+Creator-only visibility changes are implemented through the Share dialog, `PATCH /api/canvases/:id/visibility`, and the `set_canvas_visibility` MCP tool. They require the previous visibility as an optimistic precondition; already-current retries are idempotent. Changes persist atomically and advance the canvas revision without replacing the scene or assets. Live clients receive an empty scene update for that revision followed by updated canvas metadata, so sharing changes cannot cause a missed drawing revision or reset the editor.
+
 The service manages scene mutations, revisions, persistence, and publication of committed changes to the appropriate live room. No canvas state or broadcast channel is global across users or canvases.
 
 ### Remote MCP endpoint

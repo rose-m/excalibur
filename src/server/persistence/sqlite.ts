@@ -112,6 +112,12 @@ export class SqliteCanvasRepository implements CanvasRepository {
 
   close() { this.db.close(); }
 
+  setVisibility(id: string, visibility: CanvasMetadata["visibility"], expectedRevision: number, updatedAt: string): CanvasMetadata | undefined {
+    const row = this.db.prepare(`UPDATE canvases SET visibility = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? RETURNING *`).get(visibility, updatedAt, id, expectedRevision);
+    return row ? metadata(row) : undefined;
+  }
+
   getComments(id: string): CommentState {
     const row = this.db.prepare("SELECT comments_revision FROM canvases WHERE id = ?").get(id);
     if (!row) throw new Error("Canvas does not exist");

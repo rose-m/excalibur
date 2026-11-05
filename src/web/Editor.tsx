@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Excalidraw, MainMenu } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
-import type { CanvasDocument } from "../shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata } from "../shared/canvas.js";
 import { LiveCanvas } from "./live-canvas.js";
 import type { LiveRecovery, LiveStatus } from "./live-canvas.js";
 import { createLiveEditor } from "./live-editor.js";
@@ -11,8 +11,11 @@ import Comments from "./Comments.js";
 import { api } from "./api.js";
 import type { ReactNode } from "react";
 import { NavBar } from "./NavBar.js";
+import { ShareCanvas } from "./ShareCanvas.js";
 
-export default function Editor({ canvas, authenticated = false, accountControls }: { canvas: CanvasDocument; authenticated?: boolean; accountControls?: ReactNode }) {
+export default function Editor({ canvas, authenticated = false, accountControls, userId }: { canvas: CanvasDocument; authenticated?: boolean; accountControls?: ReactNode; userId: string | undefined }) {
+  const [metadata, setMetadata] = useState<CanvasMetadata>(canvas);
+  const receiveMetadata = useCallback((next: CanvasMetadata) => setMetadata(current => next.revision < current.revision ? current : next), []);
   const [editor, setEditor] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState<LiveStatus>({ ready: false, message: "Connecting…", error: "" });
   const [comments, setComments] = useState<CommentState>({ revision: -1, comments: [] });
@@ -30,7 +33,7 @@ export default function Editor({ canvas, authenticated = false, accountControls 
 
   useEffect(() => {
     if (!editor) return;
-    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current, onComments: receiveComments,
+    const client = new LiveCanvas(canvas, createLiveEditor(editor), setStatus, { recovery: recovery.current, onComments: receiveComments, onMetadata: receiveMetadata,
       getTicket: authenticated ? () => api.ticket(canvas.id).then(result => result.ticket) : undefined });
     live.current = client;
     client.connect();
@@ -43,12 +46,13 @@ export default function Editor({ canvas, authenticated = false, accountControls 
       recovery.current = client.dispose();
       live.current = null;
     };
-  }, [canvas, editor, receiveComments, authenticated]);
+  }, [canvas, editor, receiveComments, receiveMetadata, authenticated]);
 
   return <main className="editor-page">
     <NavBar title={canvas.title} accountControls={accountControls}>
       <span className="save-status" role="status">{status.message}</span>
       <button className="secondary" disabled={!status.ready} onClick={() => live.current?.flush()}>Save now</button>
+      <ShareCanvas canvas={metadata} canManage={userId === metadata.creatorUserId} onUpdate={receiveMetadata} />
     </NavBar>
     {status.error && <div className="save-error" role="alert">
       {status.error} <button onClick={() => window.location.reload()}>Reload canvas (discard unsaved edits)</button>

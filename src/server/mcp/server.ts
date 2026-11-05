@@ -2,7 +2,7 @@ import { McpServer, fromJsonSchema } from "@modelcontextprotocol/server";
 import type { CallToolResult, JsonSchemaType } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { mutationSchema, sceneSchema } from "../../shared/canvas.js";
+import { changeVisibilitySchema, mutationSchema, sceneSchema } from "../../shared/canvas.js";
 import { createCommentSchema } from "../../shared/comments.js";
 import { signature } from "../../shared/signature.js";
 import type { OperationContext } from "../auth/context.js";
@@ -57,6 +57,11 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     return withIdentity(canvas.id, metadata);
   });
   tool("list_canvases", "List accessible canvases in the current organization, with stable browser URLs.", z.strictObject({}), () => result({ canvases: canvases.list(context).map(canvas => ({ ...canvas, url: canvasUrl(canvas.id, publicUrl) })) }), true);
+  tool("set_canvas_visibility", "Creator only: share this canvas with all current organization members (view and edit), or make it private. Change sharing only when the user explicitly asks. Never public. Read visibility first and pass expectedVisibility; repeat calls for the current visibility are safe. Existing live connections are not forcibly disconnected when made private.", changeVisibilitySchema.extend({ canvasId: scope.canvasId }), args => {
+    const canvasId = id(args.canvasId);
+    const { canvasId: _canvasId, ...input } = args;
+    return withIdentity(canvasId, canvases.setVisibility(context, canvasId, input));
+  }, false, true);
   tool("get_canvas", "Reopen/read a canvas by ID or URL. Returns native elements, settings and revision. Image bytes are omitted unless includeFiles is true.", z.strictObject({ canvasId: scope.canvasId, includeFiles: z.boolean().default(false) }), args => {
     const canvas = document(args.canvasId);
     const { scene, ...metadata } = canvas;

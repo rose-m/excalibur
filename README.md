@@ -71,8 +71,8 @@ PropelAuth credentials in development mode is rejected to prevent accidental byp
    (do not alternate with `localhost`).
 2. Enable the desired login methods and invite users into organizations. The UI
    uses PropelAuth-hosted login, returns to the original canvas link, and offers
-   the organization name and sign-out. Users with no org see an invitation message.
-   Accounts with multiple orgs show a configuration error, not an org switcher.
+    an Account menu with organization switching and sign-out. Users with no org see
+    an invitation message. Accounts with multiple orgs choose a workspace.
 3. Provide runtime environment variables, then run `pnpm dev` or the built server:
 
    ```sh
@@ -88,10 +88,10 @@ Auth URL from `/api/auth/config`, so images do not need rebuilding for each
 environment. `pnpm dev` loads these variables from `.env` when present. For other
 commands, export/inject them or use Node's `--env-file=.env` option.
 
-API requests send `Authorization: Bearer <access-token>`. The server derives the
-organization from the user's sole current membership; no organization-selection
-header or browser preference is used. Zero or multiple memberships deny canvas
-access. Deep links use the same organization and canvas access checks.
+API requests send `Authorization: Bearer <access-token>` and `x-organization-id`
+for the selected organization. The server validates that selection against current
+membership; only sole memberships can omit it. Users with no memberships cannot
+access canvases. Deep links use the same organization and canvas access checks.
 Identity always comes from the validated token. Org membership and enabled/unlocked account status are
 checked against PropelAuth on every HTTP request and ticket issuance; auth
 service failures deny access. This deliberately trades an extra network call for
@@ -225,6 +225,32 @@ requires your dashboard setup and is a separate acceptance check.
 
 `AUTH_MODE=development` retains the unauthenticated local-only MCP endpoint at
 `http://127.0.0.1:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
+
+## Organization sharing
+
+New canvases are private. Open **Share** in the canvas navigation bar to copy the
+canvas link or change access. Only the creator can change sharing:
+
+- **Private**: only the creator can view and edit, while still a current org member.
+- **Organization**: all current members of that organization can view, edit, and
+  comment. Other organizations remain excluded, even if a user belongs to both.
+
+Links never grant access by themselves. Recipients must sign in and select the
+canvas's organization. The canvas list shows its actual visibility.
+
+Agents use `set_canvas_visibility` with an explicit canvas ID or application URL,
+`visibility` (`private` or `organization`), and `expectedVisibility` read from
+`get_canvas`. The same creator-only checks apply. HTTP clients use
+`PATCH /api/canvases/:id/visibility` with `{ "visibility": "organization",
+"expectedVisibility": "private" }`. Stale visibility changes return `409`; repeating
+the already-current visibility succeeds without another update.
+
+Sharing changes persist atomically, advance the canvas revision, and update open
+editors without changing scene elements, image assets or comments. Making a canvas
+private denies other members' new reads, edits, comments, renders, tickets and
+reconnects. **Existing live subscriptions are not forcibly disconnected** and may
+continue receiving updates until they disconnect. Do not treat a visibility change
+as immediate revocation of data already delivered to a browser.
 
 ## Pinned comments
 

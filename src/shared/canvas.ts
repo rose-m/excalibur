@@ -4,6 +4,12 @@ export const createCanvasSchema = z.strictObject({
   title: z.string().trim().min(1).max(200),
 });
 
+export const visibilitySchema = z.enum(["private", "organization"]);
+export const changeVisibilitySchema = z.strictObject({
+  visibility: visibilitySchema,
+  expectedVisibility: visibilitySchema,
+});
+
 // Preserve native fields, including tombstones, bindings and fractional indices.
 const elementSchema = z.object({
   id: z.string().min(1).max(200),

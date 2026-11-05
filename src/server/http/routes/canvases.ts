@@ -17,6 +17,8 @@ export function createCanvasRoutes(service: CanvasService) {
     c.json(service.save(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.post("/:id/mutations", async (c) =>
     c.json(service.mutate(c.get("context"), c.req.param("id"), await readJson(c.req))));
+  routes.patch("/:id/visibility", async c =>
+    c.json(service.setVisibility(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.get("/:id/live", liveCanvasRoute(service));
   routes.get("/:id/comments", c => c.json(service.comments.get(c.get("context"), c.req.param("id"))));
   routes.post("/:id/comments", async c => c.json(service.comments.create(c.get("context"), c.req.param("id"), await readJson(c.req)), 201));

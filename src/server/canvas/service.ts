@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createCanvasSchema, mutationSchema, saveSceneSchema, sceneSchema } from "../../shared/canvas.js";
-import type { CanvasDocument, Scene, SceneUpdate } from "../../shared/canvas.js";
+import { changeVisibilitySchema, createCanvasSchema, mutationSchema, saveSceneSchema, sceneSchema } from "../../shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata, Scene, SceneUpdate } from "../../shared/canvas.js";
 import { signature } from "../../shared/signature.js";
 import { selectedElementIdsSchema } from "../../shared/live.js";
 import type { OperationContext } from "../auth/context.js";
@@ -40,6 +40,7 @@ function validateAssets(scene: Scene) {
 
 export class CanvasService {
   private listeners = new Map<string, Set<(update: SceneUpdate) => void>>();
+  private metadataListeners = new Map<string, Set<(metadata: CanvasMetadata) => void>>();
   // Socket-scoped editor state. Never committed, versioned or broadcast as a
   // scene mutation. New connections (including reconnects) get fresh IDs.
   private editors = new Map<string, Map<string, string[]>>();
@@ -69,6 +70,43 @@ export class CanvasService {
       throw new ServiceError(404, "Canvas not found");
     }
     return canvas;
+  }
+
+  setVisibility(context: OperationContext, id: string, input: unknown): CanvasMetadata {
+    const current = this.get(context, id);
+    if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can change sharing");
+    const { visibility, expectedVisibility } = changeVisibilitySchema.parse(input);
+    if (current.visibility === visibility) {
+      const { scene: _scene, ...metadata } = current;
+      return metadata;
+    }
+    if (current.visibility !== expectedVisibility) throw new ServiceError(409, "Sharing changed. Review the current visibility and try again.");
+    const metadata = this.repository.setVisibility(id, visibility, current.revision, new Date().toISOString());
+    if (!metadata) throw new ServiceError(409, "Canvas revision changed. Read the latest canvas and retry.");
+    // Sharing advances the canvas revision without changing the scene. Send the
+    // empty scene update first so live editors cannot miss a revision.
+    const update = { revision: metadata.revision, elements: [], files: {}, sharedSettings: current.scene.sharedSettings };
+    for (const listener of this.listeners.get(id) ?? []) {
+      try { listener(update); } catch { console.error("Canvas update subscriber failed"); }
+    }
+    for (const listener of this.metadataListeners.get(id) ?? []) {
+      try { listener(metadata); } catch { console.error("Canvas metadata subscriber failed"); }
+    }
+    return metadata;
+  }
+
+  subscribeMetadata(context: OperationContext, id: string, listener: (metadata: CanvasMetadata) => void): () => void {
+    this.get(context, id);
+    let listeners = this.metadataListeners.get(id);
+    if (!listeners) { listeners = new Set(); this.metadataListeners.set(id, listeners); }
+    listeners.add(listener);
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      listeners.delete(listener);
+      if (!listeners.size && this.metadataListeners.get(id) === listeners) this.metadataListeners.delete(id);
+    };
   }
 
   save(context: OperationContext, id: string, input: unknown) {

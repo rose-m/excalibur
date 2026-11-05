@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { CanvasDocument, Mutation, Scene, SceneUpdate } from "../src/shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata, Mutation, Scene, SceneUpdate } from "../src/shared/canvas.js";
 import type { ServerMessage } from "../src/shared/live.js";
 import { LiveCanvas } from "../src/web/live-canvas.js";
 import type { LiveRecovery, LiveSocket, LiveStatus } from "../src/web/live-canvas.js";
@@ -82,11 +82,13 @@ function fixture() {
   const sockets: FakeSocket[] = [];
   const statuses: LiveStatus[] = [];
   const comments: CommentState[] = [];
+  const metadata: CanvasMetadata[] = [];
   const clients: LiveCanvas[] = [];
   function create(recovery?: LiveRecovery) {
     const client = new LiveCanvas(canvas, editor, (status) => statuses.push(status), {
       baseUrl: "http://localhost", recovery,
       onComments: state => comments.push(state),
+      onMetadata: value => metadata.push(value),
       createSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     });
     clients.push(client);
@@ -99,7 +101,7 @@ function fixture() {
   socket.message({ type: "snapshot", canvas });
   editor.applyAll();
   return {
-    canvas, editor, sockets, statuses, comments, client, socket, create,
+    canvas, editor, sockets, statuses, comments, metadata, client, socket, create,
     close: () => { for (const item of clients) item.dispose(); },
   };
 }
@@ -107,6 +109,24 @@ function fixture() {
 function update(revision: number, sharedSettings = black): SceneUpdate {
   return { revision, elements: [], files: {}, sharedSettings };
 }
+
+test("sharing metadata and empty revision updates do not dirty or interrupt the live editor", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.metadata[0]?.visibility, "private");
+    f.socket.message({ type: "update", update: update(1, white) });
+    const { scene: _scene, ...metadata } = f.canvas;
+    f.socket.message({ type: "metadata", metadata: { ...metadata, visibility: "organization", revision: 1 } });
+    f.editor.applyAll();
+    assert.equal(f.metadata.at(-1)?.visibility, "organization");
+    assert.equal(f.client.hasUnsavedChanges(), false);
+    f.socket.message({ type: "update", update: { ...update(2, white), elements: [element] } });
+    f.editor.applyAll();
+    assert.equal(f.editor.scene.elements[0]?.id, element.id);
+    assert.equal(f.statuses.at(-1)?.ready, true);
+    assert.equal(f.socket.sent.length, 0);
+  } finally { f.close(); }
+});
 
 test("ticket authentication waits before opening and fetches a fresh ticket on reconnect", async () => {
   const canvas = document();

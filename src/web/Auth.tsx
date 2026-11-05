@@ -47,7 +47,7 @@ function SignedInApp() {
     organizationId={account?.organizationId} onSignOut={() => {
       if (window.confirm("Sign out? Export any unsaved drawing before continuing.")) void logout(true);
     }} />;
-  if (!error && account?.organizationId) return <App key={`${auth.user?.userId}:${account.organizationId}`} authenticated accountControls={accountControls} />;
+  if (!error && account?.organizationId) return <App key={`${auth.user?.userId}:${account.organizationId}`} authenticated userId={auth.user?.userId} accountControls={accountControls} />;
   return <div className="app-shell">
     <NavBar accountControls={accountControls} />
     {error ? <main className="canvas-list" role="alert">{error} <a href="/">Try again</a></main> :

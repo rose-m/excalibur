@@ -52,7 +52,7 @@ function CanvasList({ authenticated }: { authenticated: boolean }) {
         {canvases.map((canvas) => <li key={canvas.id}>
           <a href={`/canvases/${canvas.id}`} className="canvas-card">
             <h2>{canvas.title}</h2>
-            <p className="muted">Private · Updated {new Date(canvas.updatedAt).toLocaleString()}</p>
+            <p className="muted">{canvas.visibility === "organization" ? "Organization" : "Private"} · Updated {new Date(canvas.updatedAt).toLocaleString()}</p>
           </a>
         </li>)}
       </ul>}
@@ -61,7 +61,7 @@ function CanvasList({ authenticated }: { authenticated: boolean }) {
   </main>;
 }
 
-function CanvasPage({ id, authenticated, accountControls }: { id: string; authenticated: boolean; accountControls?: ReactNode }) {
+function CanvasPage({ id, authenticated, accountControls, userId }: { id: string; authenticated: boolean; accountControls?: ReactNode; userId: string | undefined }) {
   const [canvas, setCanvas] = useState<CanvasDocument>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -74,15 +74,15 @@ function CanvasPage({ id, authenticated, accountControls }: { id: string; authen
   if (error) return <><NavBar accountControls={accountControls} /><main className="canvas-list"><p role="alert" className="error">{error}</p></main></>;
   if (!canvas) return loading;
   return <Suspense fallback={loading}>
-    <Editor key={canvas.id} canvas={canvas} authenticated={authenticated} accountControls={accountControls} />
+    <Editor key={canvas.id} canvas={canvas} authenticated={authenticated} accountControls={accountControls} userId={userId} />
   </Suspense>;
 }
 
-export function App({ authenticated = false, accountControls }: { authenticated?: boolean; accountControls?: ReactNode }) {
+export function App({ authenticated = false, accountControls, userId }: { authenticated?: boolean; accountControls?: ReactNode; userId?: string | undefined }) {
   const path = window.location.pathname;
   const match = /^\/canvases\/([a-f0-9-]{36})$/.exec(path);
   return <div className="app-shell">
-    {match ? <CanvasPage id={match[1]!} authenticated={authenticated} accountControls={accountControls} /> : <>
+    {match ? <CanvasPage id={match[1]!} authenticated={authenticated} accountControls={accountControls} userId={userId ?? (!authenticated ? "development-user" : undefined)} /> : <>
       <NavBar accountControls={accountControls} />
       {path === "/" ? <CanvasList authenticated={authenticated} /> : <main className="canvas-list"><h1>Page not found</h1><a href="/">Back to canvases</a></main>}
     </>}
