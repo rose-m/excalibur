@@ -9,6 +9,8 @@ export interface CanvasRepository {
   // Compare revision, save snapshot/assets, and advance revision atomically.
   commit(id: string, input: SaveScene, updatedAt: string): CanvasMetadata | undefined;
   setVisibility(id: string, visibility: CanvasMetadata["visibility"], expectedRevision: number, updatedAt: string): CanvasMetadata | undefined;
+  rename(id: string, title: string, expectedRevision: number, updatedAt: string): CanvasMetadata | undefined;
+  delete(id: string, expectedRevision: number): boolean;
   getComments(id: string): CommentState;
   addComment(id: string, comment: CanvasComment): CommentState | "limit" | "conflict";
   deleteComment(id: string, commentId: string): CommentState;

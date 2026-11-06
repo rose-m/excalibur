@@ -351,7 +351,7 @@ test("official authenticated MCP clients enforce user/org boundaries and edits r
     f.principals.alice = { userId: "alice", organizations: [{ id: "org-a", name: "A" }, { id: "org-b", name: "B" }] };
     f.tokens["alice-b"] = f.claims({ org_id: "org-b" });
     const a = await connect("alice-a");
-    assert.equal((await a.listTools()).tools.length, 31);
+    assert.equal((await a.listTools()).tools.length, 33);
     const created = await a.callTool({ name: "create_canvas", arguments: { title: "Agent private" } });
     assert(!created.isError);
     const canvas = created.structuredContent as { canvasId: string; creatorUserId: string; organizationId: string; url: string };
@@ -446,7 +446,7 @@ test("development proxies preserve the canonical public MCP host for discovery a
     assert.match(challenge.headers.get("www-authenticate")!, new RegExp(`resource_metadata="${publicUrl}`));
     assert.equal((await fetch(`${publicUrl}/health/ready`)).status, 200);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${publicUrl}/mcp`), { requestInit: { headers: { authorization: "Bearer alice-a" } } }));
-    assert.equal((await client.listTools()).tools.length, 31);
+    assert.equal((await client.listTools()).tools.length, 33);
   } finally {
     await client.close();
     await vite.close();

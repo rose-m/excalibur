@@ -13,6 +13,10 @@ export function createCanvasRoutes(service: CanvasService) {
 
   routes.get("/:id", (c) =>
     c.json(service.get(c.get("context"), c.req.param("id"))));
+  routes.patch("/:id", async c =>
+    c.json(service.rename(c.get("context"), c.req.param("id"), await readJson(c.req))));
+  routes.delete("/:id", async c =>
+    c.json(service.delete(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.put("/:id", async (c) =>
     c.json(service.save(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.post("/:id/mutations", async (c) =>

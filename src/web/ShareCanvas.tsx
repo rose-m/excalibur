@@ -1,11 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CanvasMetadata } from "../shared/canvas.js";
 import { api, ApiError } from "./api.js";
 
-export function ShareCanvas({ canvas, canManage, onUpdate }: {
+export function ShareCanvas({ canvas, canManage, onUpdate, open, onClose, onSavingChange }: {
   canvas: CanvasMetadata;
   canManage: boolean;
   onUpdate: (metadata: CanvasMetadata) => void;
+  open: boolean;
+  onClose: () => void;
+  onSavingChange?: (saving: boolean) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const expected = useRef(canvas.visibility);
@@ -15,6 +18,20 @@ export function ShareCanvas({ canvas, canManage, onUpdate }: {
   const [copyStatus, setCopyStatus] = useState("");
   const selectedVisibility = canManage ? visibility : canvas.visibility;
   const url = new URL(`/canvases/${canvas.id}`, window.location.origin).href;
+
+  useEffect(() => { onSavingChange?.(saving); }, [saving, onSavingChange]);
+
+  useEffect(() => {
+    const modal = dialog.current;
+    if (!modal) return;
+    if (open && !modal.open) {
+      expected.current = canvas.visibility;
+      setVisibility(canvas.visibility);
+      setError("");
+      setCopyStatus("");
+      modal.showModal();
+    } else if (!open && modal.open) modal.close();
+  }, [open, canvas.visibility]);
 
   async function save() {
     setSaving(true);
@@ -35,15 +52,7 @@ export function ShareCanvas({ canvas, canManage, onUpdate }: {
     } finally { setSaving(false); }
   }
 
-  return <>
-    <button className="secondary share-trigger" disabled={saving} onClick={() => {
-      expected.current = canvas.visibility;
-      setVisibility(canvas.visibility);
-      setError("");
-      setCopyStatus("");
-      dialog.current?.showModal();
-    }}>Share <span className="sharing-badge">{canvas.visibility === "organization" ? "Organization" : "Private"}</span></button>
-    <dialog ref={dialog} className="share-dialog" aria-labelledby="share-title">
+  return <dialog ref={dialog} className="share-dialog" aria-labelledby="share-title" onClose={onClose}>
       <div className="share-dialog-heading"><h2 id="share-title">Share canvas</h2><form method="dialog"><button className="share-close" aria-label="Close sharing">×</button></form></div>
       <p className="share-canvas-title">{canvas.title}</p>
       <fieldset disabled={!canManage || saving}>
@@ -68,6 +77,5 @@ export function ShareCanvas({ canvas, canManage, onUpdate }: {
       </div><p>Links do not grant access. Members must sign in to the same organization.</p><span role="status">{copyStatus}</span></div>
       {error && <p role="alert" className="error">{error}</p>}
       {canManage && <div className="share-dialog-actions"><button disabled={saving || visibility === canvas.visibility} onClick={() => { void save(); }}>{saving ? "Saving…" : "Save sharing"}</button></div>}
-    </dialog>
-  </>;
+    </dialog>;
 }

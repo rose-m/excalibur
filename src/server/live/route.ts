@@ -31,8 +31,9 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
     let unsubscribe = () => {};
     let unsubscribeComments = () => {};
     let unsubscribeMetadata = () => {};
+    let unsubscribeDeletion = () => {};
     let editor: ReturnType<CanvasService["connectEditor"]> | undefined;
-    const cleanup = () => { unsubscribe(); unsubscribeComments(); unsubscribeMetadata(); editor?.close(); };
+    const cleanup = () => { unsubscribe(); unsubscribeComments(); unsubscribeMetadata(); unsubscribeDeletion(); editor?.close(); };
     return upgradeWebSocket(() => ({
       onOpen(_event, socket) {
         try {
@@ -42,6 +43,10 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
           editor = service.connectEditor(context, id);
           unsubscribeComments = service.comments.subscribe(context, id, state => send(socket, { type: "comments", state }));
           unsubscribeMetadata = service.subscribeMetadata(context, id, metadata => send(socket, { type: "metadata", metadata }));
+          unsubscribeDeletion = service.subscribeDeletion(context, id, () => {
+            try { send(socket, { type: "deleted", canvasId: id }); }
+            finally { cleanup(); socket.close(1008, "Canvas deleted"); }
+          });
           send(socket, { type: "snapshot", canvas: service.get(context, id), comments: service.comments.get(context, id) });
         } catch { cleanup(); socket.close(1008, "Canvas unavailable"); }
       },

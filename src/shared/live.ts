@@ -15,6 +15,7 @@ export type ServerMessage =
   | { type: "snapshot"; canvas: CanvasDocument; comments?: CommentState }
   | { type: "comments"; state: CommentState }
   | { type: "metadata"; metadata: CanvasMetadata }
+  | { type: "deleted"; canvasId: string }
   | { type: "update"; update: SceneUpdate }
   | { type: "ack"; requestId: string; update: SceneUpdate }
   | { type: "error"; requestId?: string; status: number; message: string };

@@ -14,11 +14,14 @@ function fixture(t: TestContext, canManage = true) {
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   Object.defineProperty(dom.window.HTMLDialogElement.prototype, "showModal", { configurable: true, value: function (this: HTMLDialogElement) { this.open = true; } });
-  Object.defineProperty(dom.window.HTMLDialogElement.prototype, "close", { configurable: true, value: function (this: HTMLDialogElement) { this.open = false; } });
+  Object.defineProperty(dom.window.HTMLDialogElement.prototype, "close", { configurable: true, value: function (this: HTMLDialogElement) { this.open = false; this.dispatchEvent(new dom.window.Event("close")); } });
   const root = createRoot(dom.window.document.getElementById("root")!);
   let canvas: CanvasMetadata = { id: "test", title: "Team drawing", visibility: "private", creatorUserId: "owner", organizationId: "org", revision: 0, createdAt: "now", updatedAt: "now" };
   const changes: CanvasMetadata[] = [];
-  const render = () => root.render(createElement(ShareCanvas, { canvas, canManage, onUpdate: next => { canvas = next; changes.push(next); render(); } }));
+  let open = false;
+  const render = () => root.render(createElement("div", null,
+    createElement("button", { className: "test-share-trigger", onClick: () => { open = true; render(); } }, "Share canvas"),
+    createElement(ShareCanvas, { canvas, canManage, open, onClose: () => { open = false; render(); }, onUpdate: next => { canvas = next; changes.push(next); render(); } })));
   act(render);
   const document = dom.window.document;
   const click = async (element: HTMLElement) => { await act(async () => { element.click(); }); };
@@ -26,7 +29,7 @@ function fixture(t: TestContext, canManage = true) {
   const save = t.mock.method(api, "setVisibility", async (_id: string, visibility: CanvasMetadata["visibility"]) => ({ ...canvas, visibility, revision: canvas.revision + 1 }));
   return { document, click, button, changes, save,
     canvas: () => canvas,
-    open: () => click(document.querySelector<HTMLButtonElement>(".share-trigger")!),
+    open: () => click(document.querySelector<HTMLButtonElement>(".test-share-trigger")!),
     select: (visibility: string) => click(document.querySelector<HTMLInputElement>(`input[value="${visibility}"]`)!),
     close() {
       act(() => root.unmount());
@@ -50,7 +53,7 @@ test("creator sharing dialog saves explicit visibility and keeps canvas links pr
     assert.deepEqual(f.save.mock.calls[0]?.arguments, ["test", "organization", "private"]);
     assert.equal(f.canvas().visibility, "organization");
     assert.equal(f.document.querySelector("dialog")?.open, false);
-    assert.match(f.document.querySelector(".sharing-badge")?.textContent ?? "", /Organization/);
+    assert.equal(f.document.querySelector<HTMLInputElement>('input[value="organization"]')?.checked, true);
     await f.open();
     await f.select("private");
     assert.match(f.document.querySelector(".share-notice")?.textContent ?? "", /Already-open live connections/);

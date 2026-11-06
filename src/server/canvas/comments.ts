@@ -71,4 +71,6 @@ export class CommentService {
       try { listener(state); } catch { console.error("Comment subscriber failed"); }
     }
   }
+
+  forgetCanvas(id: string) { this.listeners.delete(id); }
 }

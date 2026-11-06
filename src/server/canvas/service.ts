@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { changeVisibilitySchema, createCanvasSchema, mutationSchema, saveSceneSchema, sceneSchema } from "../../shared/canvas.js";
+import { changeVisibilitySchema, createCanvasSchema, deleteCanvasSchema, mutationSchema, renameCanvasSchema, saveSceneSchema, sceneSchema } from "../../shared/canvas.js";
 import type { CanvasDocument, CanvasMetadata, Scene, SceneUpdate } from "../../shared/canvas.js";
 import { signature } from "../../shared/signature.js";
 import { selectedElementIdsSchema } from "../../shared/live.js";
@@ -41,6 +41,7 @@ function validateAssets(scene: Scene) {
 export class CanvasService {
   private listeners = new Map<string, Set<(update: SceneUpdate) => void>>();
   private metadataListeners = new Map<string, Set<(metadata: CanvasMetadata) => void>>();
+  private deletionListeners = new Map<string, Set<() => void>>();
   // Socket-scoped editor state. Never committed, versioned or broadcast as a
   // scene mutation. New connections (including reconnects) get fresh IDs.
   private editors = new Map<string, Map<string, string[]>>();
@@ -83,16 +84,69 @@ export class CanvasService {
     if (current.visibility !== expectedVisibility) throw new ServiceError(409, "Sharing changed. Review the current visibility and try again.");
     const metadata = this.repository.setVisibility(id, visibility, current.revision, new Date().toISOString());
     if (!metadata) throw new ServiceError(409, "Canvas revision changed. Read the latest canvas and retry.");
-    // Sharing advances the canvas revision without changing the scene. Send the
+    this.publishMetadata(metadata, current.scene.sharedSettings);
+    return metadata;
+  }
+
+  rename(context: OperationContext, id: string, input: unknown): CanvasMetadata {
+    const current = this.get(context, id);
+    if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can rename it");
+    const { title, expectedTitle } = renameCanvasSchema.parse(input);
+    if (current.title === title) {
+      const { scene: _scene, ...metadata } = current;
+      return metadata;
+    }
+    if (current.title !== expectedTitle) throw new ServiceError(409, "Canvas name changed. Review the current name and try again.");
+    const metadata = this.repository.rename(id, title, current.revision, new Date().toISOString());
+    if (!metadata) throw new ServiceError(409, "Canvas changed. Read the latest canvas and retry.");
+    this.publishMetadata(metadata, current.scene.sharedSettings);
+    return metadata;
+  }
+
+  delete(context: OperationContext, id: string, input: unknown) {
+    const current = this.get(context, id);
+    if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can delete it");
+    const { confirmTitle, expectedRevision } = deleteCanvasSchema.parse(input);
+    if (current.title !== confirmTitle || current.revision !== expectedRevision) throw new ServiceError(409, "Canvas changed. Review the latest canvas and confirm deletion again.");
+    if (!this.repository.delete(id, expectedRevision)) throw new ServiceError(409, "Canvas changed. Review the latest canvas and confirm deletion again.");
+    // Notify only after the cascade commits. Subscriber failures must not report
+    // failure for a deletion which has already removed the durable data.
+    for (const listener of [...(this.deletionListeners.get(id) ?? [])]) {
+      try { listener(); } catch { console.error("Canvas deletion subscriber failed"); }
+    }
+    this.deletionListeners.delete(id);
+    this.listeners.delete(id);
+    this.metadataListeners.delete(id);
+    this.editors.delete(id);
+    this.comments.forgetCanvas(id);
+    return { canvasId: id, deleted: true as const };
+  }
+
+  private publishMetadata(metadata: CanvasMetadata, sharedSettings: Scene["sharedSettings"]) {
+    // Metadata advances the canvas revision without changing the scene. Send an
     // empty scene update first so live editors cannot miss a revision.
-    const update = { revision: metadata.revision, elements: [], files: {}, sharedSettings: current.scene.sharedSettings };
+    const id = metadata.id;
+    const update = { revision: metadata.revision, elements: [], files: {}, sharedSettings };
     for (const listener of this.listeners.get(id) ?? []) {
       try { listener(update); } catch { console.error("Canvas update subscriber failed"); }
     }
     for (const listener of this.metadataListeners.get(id) ?? []) {
       try { listener(metadata); } catch { console.error("Canvas metadata subscriber failed"); }
     }
-    return metadata;
+  }
+
+  subscribeDeletion(context: OperationContext, id: string, listener: () => void): () => void {
+    this.get(context, id);
+    let listeners = this.deletionListeners.get(id);
+    if (!listeners) { listeners = new Set(); this.deletionListeners.set(id, listeners); }
+    listeners.add(listener);
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      listeners.delete(listener);
+      if (!listeners.size && this.deletionListeners.get(id) === listeners) this.deletionListeners.delete(id);
+    };
   }
 
   subscribeMetadata(context: OperationContext, id: string, listener: (metadata: CanvasMetadata) => void): () => void {

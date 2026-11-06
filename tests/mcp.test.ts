@@ -32,7 +32,7 @@ test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering
   };
   try {
     await client.connect(new StreamableHTTPClientTransport(endpoint));
-    assert.equal((await client.listTools()).tools.length, 31);
+    assert.equal((await client.listTools()).tools.length, 33);
     const first = await call("create_canvas", { title: "Agent diagram" });
     const second = await call("create_canvas", { title: "Isolated" });
     const canvasId = first.canvasId as string;

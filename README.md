@@ -226,9 +226,35 @@ requires your dashboard setup and is a separate acceptance check.
 `AUTH_MODE=development` retains the unauthenticated local-only MCP endpoint at
 `http://127.0.0.1:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
 
+## Rename and delete canvases
+
+The creator can open **Canvas actions** (the **…** button in the navigation bar) to rename
+or permanently delete a canvas. Other organization members can edit a shared
+drawing but cannot rename or delete the canvas.
+
+Renaming updates open editors without reloading the scene or changing its assets,
+comments or visibility. HTTP clients use `PATCH /api/canvases/:id` with
+`{ "title": "New name", "expectedTitle": "Previous name" }`; agents use
+`rename_canvas` with the same fields plus `canvasId`. Names are trimmed and limited
+to 200 characters. Same-name retries do not advance the revision; stale previous
+names return `409`.
+
+Deletion requires typing the exact current canvas name in the confirmation dialog.
+The dialog reviews a fresh canvas snapshot before enabling deletion. HTTP clients
+use `DELETE /api/canvases/:id` with `{ "confirmTitle": "Current name",
+"expectedRevision": 12 }`; agents use `delete_canvas` with the same fields plus
+`canvasId`, only after explicit user confirmation. A changed name or canvas revision
+returns `409` and requires another review and confirmation, not automatic retry.
+
+Deletion atomically removes the canvas, all image assets and comments. There is no
+trash or undo. All its live connections close, pending tickets cannot reopen it,
+and later requests return `404`. Other open editors stop sending/reconnecting and
+retain their local scene for export. The deleting tab returns to the canvas list
+after success; its typed confirmation explicitly includes discarding unsaved work.
+
 ## Organization sharing
 
-New canvases are private. Open **Share** in the canvas navigation bar to copy the
+New canvases are private. Open **Canvas actions → Share canvas** to copy the
 canvas link or change access. Only the creator can change sharing:
 
 - **Private**: only the creator can view and edit, while still a current org member.
@@ -237,6 +263,10 @@ canvas link or change access. Only the creator can change sharing:
 
 Links never grant access by themselves. Recipients must sign in and select the
 canvas's organization. The canvas list shows its actual visibility.
+
+**Save now** is also in Canvas actions. It is available to all live editors and
+disabled while disconnected. Save status remains visible in the navigation bar;
+automatic saving is unchanged.
 
 Agents use `set_canvas_visibility` with an explicit canvas ID or application URL,
 `visibility` (`private` or `organization`), and `expectedVisibility` read from
@@ -285,7 +315,7 @@ Agents can also retrieve, add, and resolve notes through MCP.
   with local or unacknowledged edits, editing stops: export unsaved work, then
   explicitly reload. Offline edits are never silently replayed.
 
-HTTP endpoints: `GET/POST /api/canvases`, `GET/PUT /api/canvases/:id`, and
+HTTP endpoints: `GET/POST /api/canvases`, `GET/PUT/PATCH/DELETE /api/canvases/:id`, and
 `POST /api/canvases/:id/mutations`, plus `GET /health/live` / `GET /health/ready`.
 Create accepts `{ "title": "My canvas" }`. Mutations accept changed `elements`,
 optional `files` / `sharedSettings`, and an optional `expectedRevision` for

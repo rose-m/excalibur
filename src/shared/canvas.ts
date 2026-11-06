@@ -10,6 +10,16 @@ export const changeVisibilitySchema = z.strictObject({
   expectedVisibility: visibilitySchema,
 });
 
+export const renameCanvasSchema = z.strictObject({
+  title: createCanvasSchema.shape.title,
+  expectedTitle: z.string().min(1).max(200),
+});
+
+export const deleteCanvasSchema = z.strictObject({
+  confirmTitle: z.string().min(1).max(200),
+  expectedRevision: z.number().int().nonnegative(),
+});
+
 // Preserve native fields, including tombstones, bindings and fractional indices.
 const elementSchema = z.object({
   id: z.string().min(1).max(200),

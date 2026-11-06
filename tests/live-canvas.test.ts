@@ -83,12 +83,14 @@ function fixture() {
   const statuses: LiveStatus[] = [];
   const comments: CommentState[] = [];
   const metadata: CanvasMetadata[] = [];
+  let deletions = 0;
   const clients: LiveCanvas[] = [];
   function create(recovery?: LiveRecovery) {
     const client = new LiveCanvas(canvas, editor, (status) => statuses.push(status), {
       baseUrl: "http://localhost", recovery,
       onComments: state => comments.push(state),
       onMetadata: value => metadata.push(value),
+      onDeleted: () => { deletions++; },
       createSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
     });
     clients.push(client);
@@ -101,7 +103,7 @@ function fixture() {
   socket.message({ type: "snapshot", canvas });
   editor.applyAll();
   return {
-    canvas, editor, sockets, statuses, comments, metadata, client, socket, create,
+    canvas, editor, sockets, statuses, comments, metadata, client, socket, create, deletions: () => deletions,
     close: () => { for (const item of clients) item.dispose(); },
   };
 }
@@ -125,6 +127,24 @@ test("sharing metadata and empty revision updates do not dirty or interrupt the 
     assert.equal(f.editor.scene.elements[0]?.id, element.id);
     assert.equal(f.statuses.at(-1)?.ready, true);
     assert.equal(f.socket.sent.length, 0);
+  } finally { f.close(); }
+});
+
+test("remote deletion stops writes and reconnects while retaining unsaved work for export", () => {
+  const f = fixture();
+  try {
+    f.editor.scene.elements = [element];
+    f.client.changed();
+    f.socket.message({ type: "deleted", canvasId: f.canvas.id });
+    assert.equal(f.deletions(), 1);
+    assert.equal(f.statuses.at(-1)?.ready, false);
+    assert.match(f.statuses.at(-1)?.error ?? "", /deleted.*Export/);
+    assert.equal(f.client.hasUnsavedChanges(), true);
+    assert.equal(f.editor.scene.elements[0]?.id, element.id);
+    f.client.flush();
+    f.client.connect();
+    assert.equal(f.socket.sent.length, 0);
+    assert.equal(f.sockets.length, 1);
   } finally { f.close(); }
 });
 

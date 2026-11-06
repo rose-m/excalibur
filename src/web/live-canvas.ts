@@ -15,6 +15,7 @@ type LiveOptions = {
   recovery?: LiveRecovery | undefined;
   onComments?: (state: CommentState) => void;
   onMetadata?: (metadata: CanvasMetadata) => void;
+  onDeleted?: () => void;
   getTicket?: (() => Promise<string>) | undefined;
 };
 
@@ -91,6 +92,9 @@ export class LiveCanvas {
           this.receiveComments(message.state);
         } else if (message.type === "metadata") {
           this.options.onMetadata?.(message.metadata);
+        } else if (message.type === "deleted") {
+          this.fail("This canvas was deleted. Export any unsaved drawing before returning to your canvases.");
+          this.options.onDeleted?.();
         } else if (message.type === "update") {
           this.receive(message.update);
         } else if (message.type === "ack") {

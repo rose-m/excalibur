@@ -84,6 +84,8 @@ Every operation carries an authenticated user, organization context, and explici
 
 Creator-only visibility changes are implemented through the Share dialog, `PATCH /api/canvases/:id/visibility`, and the `set_canvas_visibility` MCP tool. They require the previous visibility as an optimistic precondition; already-current retries are idempotent. Changes persist atomically and advance the canvas revision without replacing the scene or assets. Live clients receive an empty scene update for that revision followed by updated canvas metadata, so sharing changes cannot cause a missed drawing revision or reset the editor.
 
+Creator-only rename and deletion use the canvas actions menu, `PATCH` and `DELETE /api/canvases/:id`, and the `rename_canvas` / `delete_canvas` MCP tools. Renaming requires the previous title, advances the canvas revision, and uses the same metadata broadcast path as sharing. Deletion requires the exact current title and canvas revision. It atomically cascades to assets and comments, notifies and closes all live connections, and clears process-local canvas subscriptions and editor selections. Conflicts require review and explicit confirmation again. Other open browsers retain unsaved drawing state for export instead of redirecting or reconnecting automatically.
+
 The service manages scene mutations, revisions, persistence, and publication of committed changes to the appropriate live room. No canvas state or broadcast channel is global across users or canvases.
 
 ### Remote MCP endpoint

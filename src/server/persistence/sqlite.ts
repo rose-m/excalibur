@@ -118,6 +118,17 @@ export class SqliteCanvasRepository implements CanvasRepository {
     return row ? metadata(row) : undefined;
   }
 
+  rename(id: string, title: string, expectedRevision: number, updatedAt: string): CanvasMetadata | undefined {
+    const row = this.db.prepare(`UPDATE canvases SET title = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? RETURNING *`).get(title, updatedAt, id, expectedRevision);
+    return row ? metadata(row) : undefined;
+  }
+
+  delete(id: string, expectedRevision: number): boolean {
+    // Foreign-key cascades remove assets and comments in this same transaction.
+    return this.db.prepare("DELETE FROM canvases WHERE id = ? AND revision = ?").run(id, expectedRevision).changes > 0;
+  }
+
   getComments(id: string): CommentState {
     const row = this.db.prepare("SELECT comments_revision FROM canvases WHERE id = ?").get(id);
     if (!row) throw new Error("Canvas does not exist");

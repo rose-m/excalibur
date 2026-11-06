@@ -56,8 +56,6 @@ button.account-signout { display: flex; align-items: center; gap: 10px; width: 1
 button.account-signout:hover { background: #fff4f3; color: #9b2727; }
 .editor-page { flex: 1; min-height: 0; display: flex; flex-direction: column; background: white; }
 .save-status { color: #706e83; font-size: 13px; white-space: nowrap; }
-.share-trigger { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.sharing-badge { font-size: 11px; color: #79738f; }
 .share-dialog { width: 480px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #e3e1ef; border-radius: 16px; color: #25243c; box-shadow: 0 16px 60px #25243c30; }
 .share-dialog::backdrop { background: #25243c55; }
 .share-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -81,6 +79,20 @@ button.account-signout:hover { background: #fff4f3; color: #9b2727; }
 .share-link p { margin: 8px 0; }
 .share-link [role="status"] { font-size: 12px; color: #5148b8; }
 .share-dialog-actions { display: flex; justify-content: flex-end; margin-top: 20px; }
+.canvas-actions { position: relative; }
+button.canvas-actions-trigger { display: grid; place-items: center; padding: 8px; }
+.canvas-actions-popup { position: absolute; right: 0; top: calc(100% + 8px); z-index: 10; width: 240px; max-width: calc(100vw - 24px); padding: 6px; background: white; border: 1px solid #e3e1ef; border-radius: 10px; box-shadow: 0 12px 36px #25243c18; }
+.canvas-actions-popup button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; background: white; color: #47435e; text-align: left; padding: 10px 12px; }
+.canvas-action-hint { color: #89849b; font-size: 11px; }
+.canvas-actions-divider { border-top: 1px solid #eeedf5; margin: 6px 0; }
+.canvas-actions-popup button:hover, .canvas-actions-popup button:focus-visible { background: #f8f7fd; }
+.canvas-actions-popup button.canvas-delete-item { color: #9b2727; }
+.canvas-actions-popup button.canvas-delete-item:hover { background: #fff4f3; }
+.canvas-action-dialog label { display: block; font-size: 13px; margin: 12px 0 8px; overflow-wrap: anywhere; }
+.canvas-action-dialog input { width: 100%; }
+.canvas-delete-warning { font-size: 14px; line-height: 1.5; }
+button.danger { background: #a23232; }
+button.danger:hover { background: #852828; }
 .save-error { padding: 10px 20px; font-size: 13px; background: #fff0f0; }
 .save-error button { margin-left: 8px; font-size: 12px; padding: 6px; }
 .editor-surface { flex: 1; min-height: 0; position: relative; }
@@ -94,8 +106,8 @@ button.account-signout:hover { background: #fff4f3; color: #9b2727; }
   .nav-actions { gap: 6px; }
   .app-nav button.secondary { padding: 8px; }
   .save-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .sharing-badge { display: none; }
 }
+@media (max-width: 480px) { .account-trigger > span:not(.account-avatar) { display: none; } }
 .comment-tool { display: flex; align-items: center; gap: 7px; height: 36px; padding: 6px 12px; background: white; color: #5148b8; border: 1px solid #d9d7eb; font-size: 13px; }
 .comment-tool:hover, .comment-tool[aria-pressed="true"] { background: #eeeafb; color: #443ca0; }
 .comments-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }

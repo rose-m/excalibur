@@ -61,7 +61,7 @@ export function AccountMenu({ email, organizations, organizationId, onSignOut }:
   }
 
   return <div className="account-menu" ref={container} onKeyDown={onKeyDown}>
-    <button className="account-trigger" ref={trigger} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
+    <button className="account-trigger" ref={trigger} aria-label="Account" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => { initialFocus.current = "selected"; setOpen(value => !value); }}
       onKeyDown={event => {
         if (!open && ["ArrowDown", "ArrowUp"].includes(event.key)) {

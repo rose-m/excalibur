@@ -91,7 +91,7 @@ function nextMessage(socket: WebSocket, type: ServerMessage["type"]): Promise<Se
   });
 }
 
-test("HTTP, MCP and live clients share and unshare with the same authorization rules", { timeout: 15_000 }, async () => {
+test("HTTP, MCP and live clients enforce sharing and creator-only canvas management", { timeout: 15_000 }, async () => {
   const repository = new SqliteCanvasRepository(":memory:");
   const service = new CanvasService(repository);
   let app!: ReturnType<typeof createApp>;
@@ -157,6 +157,16 @@ test("HTTP, MCP and live clients share and unshare with the same authorization r
     const outsiderClient = await connect("outsider");
     const tool = (await ownerClient.listTools()).tools.find(item => item.name === "set_canvas_visibility");
     assert.equal(tool?.annotations?.destructiveHint, true);
+    for (const [client, identity, expected] of [[memberClient, "member", 403], [outsiderClient, "outsider", 404]] as const) {
+      for (const [name, method, input] of [
+        ["rename_canvas", "PATCH", { title: "Denied", expectedTitle: canvas.title }],
+        ["delete_canvas", "DELETE", { confirmTitle: canvas.title, expectedRevision: 1 }],
+      ] as const) {
+        const denied = await client.callTool({ name, arguments: { canvasId: canvas.id, ...input } });
+        assert.equal((denied.structuredContent as { error: { status: number } }).error.status, expected);
+        assert.equal((await request(path, identity, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).status, expected);
+      }
+    }
     assert.equal((await memberClient.callTool({ name: "get_canvas", arguments: { canvasId: canvas.id } })).isError, undefined);
     const edited = await memberClient.callTool({ name: "apply_mutations", arguments: { canvasId: canvas.id, expectedRevision: 1, elements: [{ id: "member-edit", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] } });
     assert(!edited.isError);
@@ -188,6 +198,36 @@ test("HTTP, MCP and live clients share and unshare with the same authorization r
     const update = nextMessage(memberSocket, "update");
     service.mutate(owner, canvas.id, { elements: [{ id: "owner-edit", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
     assert.equal((await update).type, "update", "existing live subscriptions are not forcibly revoked in this version");
+    const renamedMetadata = nextMessage(ownerSocket, "metadata");
+    const renamed = await ownerClient.callTool({ name: "rename_canvas", arguments: { canvasId: `${base}/canvases/${canvas.id}`, title: "Renamed canvas", expectedTitle: canvas.title } });
+    assert(!renamed.isError);
+    const renamedMessage = await renamedMetadata;
+    assert(renamedMessage.type === "metadata" && renamedMessage.metadata.title === "Renamed canvas");
+    assert.equal(ownerSocket.readyState, WebSocket.OPEN, "renaming does not reset live editing");
+    const renameResponse = await request(path, "owner", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Final name", expectedTitle: "Renamed canvas" }) });
+    assert.equal(renameResponse.status, 200);
+    const reviewed = await renameResponse.json() as CanvasMetadata;
+    assert.equal(reviewed.revision, 6);
+    assert.equal((await request(path, "owner", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmTitle: "Final name", expectedRevision: 0 }) })).status, 409);
+    const ownerDeleted = nextMessage(ownerSocket, "deleted");
+    const memberDeleted = nextMessage(memberSocket, "deleted");
+    const ownerClosed = once(ownerSocket, "close");
+    const memberClosed = once(memberSocket, "close");
+    const deleted = await request(path, "owner", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmTitle: reviewed.title, expectedRevision: reviewed.revision }) });
+    assert.equal(deleted.status, 200);
+    assert.equal((await ownerDeleted).type, "deleted");
+    assert.equal((await memberDeleted).type, "deleted");
+    assert.equal((await ownerClosed)[0], 1008);
+    assert.equal((await memberClosed)[0], 1008);
+    for (const suffix of ["", "/comments", "/live-ticket"]) assert.equal((await request(`${path}${suffix}`, "owner", suffix === "/live-ticket" ? { method: "POST" } : {})).status, 404);
+    assert.equal(service.list(owner).length, 0);
+    const another = service.create(owner, { title: "MCP deletion" });
+    const deleteTool = (await ownerClient.listTools()).tools.find(item => item.name === "delete_canvas");
+    assert.equal(deleteTool?.annotations?.destructiveHint, true);
+    const deletedByAgent = await ownerClient.callTool({ name: "delete_canvas", arguments: { canvasId: another.id, confirmTitle: another.title, expectedRevision: 0 } });
+    assert(!deletedByAgent.isError);
+    assert.deepEqual(deletedByAgent.structuredContent, { canvasId: another.id, deleted: true });
+    assert.equal(repository.get(another.id), undefined);
   } finally {
     for (const socket of sockets) socket.terminate();
     for (const socket of live.sockets.clients) socket.terminate();

@@ -29,6 +29,12 @@ export const api = {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
   }),
   get: (id: string) => request<CanvasDocument>(`/api/canvases/${id}`),
+  rename: (id: string, title: string, expectedTitle: string) => request<CanvasMetadata>(`/api/canvases/${id}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ title, expectedTitle }),
+  }),
+  deleteCanvas: (id: string, confirmTitle: string, expectedRevision: number) => request<{ canvasId: string; deleted: true }>(`/api/canvases/${id}`, {
+    method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmTitle, expectedRevision }),
+  }),
   setVisibility: (id: string, visibility: CanvasMetadata["visibility"], expectedVisibility: CanvasMetadata["visibility"]) => request<CanvasMetadata>(`/api/canvases/${id}/visibility`, {
     method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ visibility, expectedVisibility }),
   }),
