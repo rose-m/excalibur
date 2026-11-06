@@ -9,7 +9,7 @@ import { CanvasService } from "../src/server/canvas/service.js";
 import { developmentContext } from "../src/server/auth/context.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { ServerMessage } from "../src/shared/live.js";
 
 class Inbox {
@@ -42,7 +42,7 @@ class Inbox {
 }
 
 test("two WebSocket clients and service edits share committed canvas rooms; joins/reconnects resync", { timeout: 15_000 }, async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const app = createApp(service, "dist/web", 3000);
   const live = createLiveServer();
@@ -58,7 +58,7 @@ test("two WebSocket clients and service edits share committed canvas rooms; join
   }
   const element = (id: string, index: string, version = 1, versionNonce = 1) => ({ id, index, type: "rectangle", version, versionNonce, isDeleted: false });
   try {
-    const canvas = service.create(developmentContext, { title: "Shared" });
+    const canvas = await service.create(developmentContext, { title: "Shared" });
     async function rejected(id: string, origin?: string) {
       return new Promise<number>((resolve, reject) => {
         const socket = new WebSocket(`${base}/api/canvases/${id}/live`, origin ? { origin } : {});
@@ -74,7 +74,7 @@ test("two WebSocket clients and service edits share committed canvas rooms; join
     assert.equal(await rejected(canvas.id), 403);
     assert.equal(await rejected(canvas.id, "https://unrelated.example"), 403);
     assert.equal(await rejected(randomUUID(), "http://localhost:3000"), 404);
-    const isolated = service.create(developmentContext, { title: "Isolated" });
+    const isolated = await service.create(developmentContext, { title: "Isolated" });
     const a = connect(canvas.id);
     const b = connect(canvas.id);
     const other = connect(isolated.id);
@@ -85,31 +85,31 @@ test("two WebSocket clients and service edits share committed canvas rooms; join
     a.socket.send(Buffer.from("{}"));
     const binary = await a.next("error");
     assert.equal(binary.type === "error" && binary.status, 400);
-    assert.equal(service.get(developmentContext, canvas.id).revision, 0);
+    assert.equal((await service.get(developmentContext, canvas.id)).revision, 0);
     a.mutate([element("a", "a0")]);
     const ack = await a.next("ack");
     assert.equal(ack.type === "ack" && ack.update.revision, 1);
     const received = await b.next("update");
     assert.equal(received.type === "update" && received.update.elements[0]?.id, "a");
-    assert.equal(service.get(developmentContext, canvas.id).revision, 1);
+    assert.equal((await service.get(developmentContext, canvas.id)).revision, 1);
     b.mutate([element("b", "a1")]);
     await b.next("ack");
-    assert.equal(service.get(developmentContext, canvas.id).scene.elements.length, 2);
+    assert.equal((await service.get(developmentContext, canvas.id)).scene.elements.length, 2);
     assert.deepEqual(other.messages, [], "canvas rooms must not leak updates");
 
     a.mutate([{ ...element("a", "a0", 2, 90), width: 90 }]);
     b.mutate([{ ...element("a", "a0", 2, 10), width: 10 }]);
     await Promise.all([a.next("ack"), b.next("ack")]);
-    assert.equal(service.get(developmentContext, canvas.id).scene.elements[0]?.width, 10);
-    const revision = service.get(developmentContext, canvas.id).revision;
+    assert.equal((await service.get(developmentContext, canvas.id)).scene.elements[0]?.width, 10);
+    const revision = (await service.get(developmentContext, canvas.id)).revision;
     a.mutate([element("stale", "a2")], 0);
     const conflict = await a.next("error");
     assert.equal(conflict.type === "error" && conflict.status, 409);
-    assert.equal(service.get(developmentContext, canvas.id).revision, revision);
+    assert.equal((await service.get(developmentContext, canvas.id)).revision, revision);
 
     a.socket.close();
     await once(a.socket, "close");
-    service.mutate(developmentContext, canvas.id, { elements: [element("agent", "a2")] });
+    await service.mutate(developmentContext, canvas.id, { elements: [element("agent", "a2")] });
     const reconnected = connect(canvas.id);
     const snapshot = await reconnected.next("snapshot");
     assert.equal(snapshot.type === "snapshot" && snapshot.canvas.revision, revision + 1);
@@ -125,6 +125,101 @@ test("two WebSocket clients and service edits share committed canvas rooms; join
     for (const client of clients) client.socket.terminate();
     await new Promise<void>((resolve) => live.sockets.close(() => resolve()));
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    repository.close();
+    await repository.close();
   }
 });
+
+test("async live initialization sends a snapshot before queued scene and comment writes", { timeout: 15_000 }, async t => {
+  const repository = await createTestRepository();
+  const service = new CanvasService(repository);
+  const app = createApp(service, "dist/web", 3000);
+  const live = createLiveServer();
+  const server = createAdaptorServer({ fetch: app.fetch, websocket: live.adapter });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let entered!: () => void;
+  const subscribing = new Promise<void>(resolve => { entered = resolve; });
+  const subscribe = service.subscribe.bind(service);
+  t.mock.method(service, "subscribe", async (...args: Parameters<CanvasService["subscribe"]>) => {
+    const cleanup = await subscribe(...args);
+    entered();
+    await gate;
+    return cleanup;
+  });
+  let client: Inbox | undefined;
+  try {
+    const canvas = await service.create(developmentContext, { title: "Joining" });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    client = new Inbox(new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/api/canvases/${canvas.id}/live`, { origin: "http://localhost:3000" }));
+    await subscribing;
+    const write = service.mutate(developmentContext, canvas.id, { elements: [{ id: "queued", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
+    const note = service.comments.create(developmentContext, canvas.id, { id: randomUUID(), text: "Queued note", anchor: { type: "canvas", x: 0, y: 0 } });
+    release();
+    const snapshot = await client.next("snapshot");
+    assert(snapshot.type === "snapshot");
+    assert.equal(snapshot.canvas.revision, 0);
+    assert.equal(snapshot.comments?.revision, 0);
+    await Promise.all([write, note]);
+    const update = await client.next("update");
+    const comments = await client.next("comments");
+    assert(update.type === "update" && update.update.revision === 1);
+    assert(comments.type === "comments" && comments.state.revision === 1);
+  } finally {
+    release();
+    client?.socket.terminate();
+    await new Promise<void>(resolve => live.sockets.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await app.closeMcp();
+    await repository.close();
+  }
+});
+
+for (const limit of ["count", "bytes"] as const) {
+  test(`live pending-message ${limit} limit disconnects overloaded clients during initialization`, { timeout: 15_000 }, async t => {
+    const repository = await createTestRepository();
+    const service = new CanvasService(repository);
+    const app = createApp(service, "dist/web", 3000);
+    const live = createLiveServer();
+    const server = createAdaptorServer({ fetch: app.fetch, websocket: live.adapter });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered!: () => void;
+    const subscribing = new Promise<void>(resolve => { entered = resolve; });
+    const subscribe = service.subscribe.bind(service);
+    t.mock.method(service, "subscribe", async (...args: Parameters<CanvasService["subscribe"]>) => {
+      const cleanup = await subscribe(...args);
+      entered();
+      await gate;
+      return cleanup;
+    });
+    let socket: WebSocket | undefined;
+    try {
+      const canvas = await service.create(developmentContext, { title: "Overloaded client" });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      socket = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/api/canvases/${canvas.id}/live`, { origin: "http://localhost:3000" });
+      socket.on("error", () => {});
+      await once(socket, "open");
+      await subscribing;
+      const closed = once(socket, "close");
+      const payload = JSON.stringify({ type: "mutate", requestId: randomUUID(), mutation: { elements: [], sharedSettings: { viewBackgroundColor: "#123456" } } });
+      const message = limit === "bytes" ? payload + " ".repeat(17 * 1024 * 1024) : payload;
+      for (let i = 0; i < (limit === "bytes" ? 2 : 65); i++) socket.send(message);
+      const [code] = await closed;
+      assert.equal(code, 1013, "overload must close without waiting for the blocked database work");
+      release();
+      // Drain initialization and queued messages; none may mutate after cleanup.
+      await service.exclusive(canvas.id, async () => {});
+      assert.equal((await service.get(developmentContext, canvas.id)).revision, 0);
+      assert.deepEqual((await service.getSelectedElements(developmentContext, canvas.id)).editors, []);
+    } finally {
+      release();
+      socket?.terminate();
+      await new Promise<void>(resolve => live.sockets.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      await app.closeMcp();
+      await repository.close();
+    }
+  });
+}

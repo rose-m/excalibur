@@ -8,23 +8,28 @@ import { ServiceError } from "./errors.js";
 
 export class CommentService {
   private listeners = new Map<string, Set<(state: CommentState) => void>>();
-  constructor(private repository: CanvasRepository, private access: (context: OperationContext, id: string) => CanvasDocument) {}
+  constructor(private repository: CanvasRepository, private access: (context: OperationContext, id: string) => Promise<CanvasDocument>,
+    private exclusive: <T>(id: string, run: () => Promise<T>) => Promise<T>) {}
 
-  get(context: OperationContext, id: string) {
-    this.access(context, id);
+  async get(context: OperationContext, id: string) {
+    await this.access(context, id);
     return this.repository.getComments(id);
   }
 
   create(context: OperationContext, id: string, input: unknown) {
-    const canvas = this.access(context, id);
+    return this.exclusive(id, () => this.createLocked(context, id, input));
+  }
+
+  private async createLocked(context: OperationContext, id: string, input: unknown) {
+    const canvas = await this.access(context, id);
     const comment = createCommentSchema.parse(input);
     const anchor = comment.anchor;
-    const before = this.repository.getComments(id);
+    const before = await this.repository.getComments(id);
     if (anchor.type === "element" && !before.comments.some(item => item.id === comment.id)
       && !canvas.scene.elements.some(element => element.id === anchor.elementId && !element.isDeleted)) {
       throw new ServiceError(409, "The attached element is not saved or no longer exists. Save the drawing or choose another point.");
     }
-    const result = this.repository.addComment(id, { ...comment, createdAt: new Date().toISOString() });
+    const result = await this.repository.addComment(id, { ...comment, createdAt: new Date().toISOString() });
     if (result === "limit") throw new ServiceError(413, "A canvas can have at most 500 comments. Resolve a comment first.");
     if (result === "conflict") throw new ServiceError(409, "Comment ID already exists with different content");
     if (result.revision !== before.revision) this.publish(id, result);
@@ -32,11 +37,15 @@ export class CommentService {
   }
 
   edit(context: OperationContext, id: string, commentId: string, input: unknown) {
-    this.access(context, id);
+    return this.exclusive(id, () => this.editLocked(context, id, commentId, input));
+  }
+
+  private async editLocked(context: OperationContext, id: string, commentId: string, input: unknown) {
+    await this.access(context, id);
     z.uuid().parse(commentId);
     const { text, expectedText } = editCommentSchema.parse(input);
-    const before = this.repository.getComments(id);
-    const result = this.repository.editComment(id, commentId, text, expectedText);
+    const before = await this.repository.getComments(id);
+    const result = await this.repository.editComment(id, commentId, text, expectedText);
     if (result === "missing") throw new ServiceError(404, "This comment was resolved or no longer exists. Your changes have not been saved.");
     if (result === "conflict") throw new ServiceError(409, "This comment changed elsewhere. Copy your changes, then cancel and reopen Edit to review the latest text.");
     if (result.revision !== before.revision) this.publish(id, result);
@@ -44,16 +53,20 @@ export class CommentService {
   }
 
   resolve(context: OperationContext, id: string, commentId: string) {
-    this.access(context, id);
+    return this.exclusive(id, () => this.resolveLocked(context, id, commentId));
+  }
+
+  private async resolveLocked(context: OperationContext, id: string, commentId: string) {
+    await this.access(context, id);
     z.uuid().parse(commentId);
-    const before = this.repository.getComments(id);
-    const result = this.repository.deleteComment(id, commentId);
+    const before = await this.repository.getComments(id);
+    const result = await this.repository.deleteComment(id, commentId);
     if (result.revision !== before.revision) this.publish(id, result);
     return result;
   }
 
-  subscribe(context: OperationContext, id: string, listener: (state: CommentState) => void) {
-    this.access(context, id);
+  async subscribe(context: OperationContext, id: string, listener: (state: CommentState) => void) {
+    await this.access(context, id);
     let listeners = this.listeners.get(id);
     if (!listeners) { listeners = new Set(); this.listeners.set(id, listeners); }
     listeners.add(listener);

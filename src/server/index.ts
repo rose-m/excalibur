@@ -2,13 +2,13 @@ import { serve } from "@hono/node-server";
 import { config } from "./config.js";
 import { CanvasService } from "./canvas/service.js";
 import { createApp } from "./http/app.js";
-import { SqliteCanvasRepository } from "./persistence/sqlite.js";
+import { PostgresCanvasRepository } from "./persistence/postgres.js";
 import { createLiveServer } from "./live/server.js";
 import { localAddresses } from "./local-network.js";
 import { propelAuthentication } from "./auth/propelauth.js";
 import { propelMcpAuthentication } from "./auth/mcp.js";
 
-const repository = new SqliteCanvasRepository(config.databasePath);
+const repository = await PostgresCanvasRepository.open(config.database);
 const service = new CanvasService(repository);
 const authentication = config.authMode === "propelauth" ? propelAuthentication(config.authUrl!, config.apiKey!) : undefined;
 const mcpAuthentication = authentication && config.mcpClientId && config.mcpClientSecret ? propelMcpAuthentication({
@@ -42,9 +42,9 @@ function shutdown() {
   for (const socket of liveServer.sockets.clients) socket.close(1001, "Server shutting down");
   const socketsClosed = new Promise<void>((resolve) => liveServer.sockets.close(() => resolve()));
   const httpClosed = new Promise<Error | undefined>((resolve) => server.close((error) => resolve(error)));
-  void Promise.all([httpClosed, socketsClosed, app.closeMcp()]).then(([error]) => {
+  void Promise.all([httpClosed, socketsClosed, app.closeMcp()]).then(async ([error]) => {
+    await repository.close();
     clearTimeout(timeout);
-    repository.close();
     if (error) {
       console.error(error);
       process.exitCode = 1;

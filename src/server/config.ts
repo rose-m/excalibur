@@ -9,6 +9,19 @@ const authUrl = process.env.PROPELAUTH_AUTH_URL;
 const apiKey = process.env.PROPELAUTH_API_KEY;
 const mcpClientId = process.env.PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID || undefined;
 const mcpClientSecret = process.env.PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET || undefined;
+const database = {
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT ?? 5432),
+  database: process.env.PGDATABASE,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+};
+for (const key of ["PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD"] as const) {
+  if (!process.env[key]) throw new Error(`${key} is required`);
+}
+if (!Number.isInteger(database.port) || database.port < 1 || database.port > 65535) {
+  throw new Error("PGPORT must be an integer between 1 and 65535");
+}
 if (Boolean(mcpClientId) !== Boolean(mcpClientSecret)) throw new Error("Both MCP Request Validation credentials must be set together");
 if (authMode === "development" && (mcpClientId || mcpClientSecret)) throw new Error("MCP OAuth credentials require AUTH_MODE=propelauth");
 if (authMode === "propelauth") {
@@ -37,6 +50,6 @@ export const config = {
   allowLocal,
   port,
   publicUrl: publicUrl.origin,
-  databasePath: process.env.DATABASE_PATH ?? resolve("data/excalibur.sqlite"),
+  database,
   webDirectory: resolve("dist/web"),
 };

@@ -10,7 +10,7 @@ import { CanvasService } from "../src/server/canvas/service.js";
 import { ServiceError } from "../src/server/canvas/errors.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { CanvasDocument } from "../src/shared/canvas.js";
 
 const context = { userId: "alice", organizationId: "org-a" };
@@ -59,7 +59,7 @@ function authentication() {
 }
 
 test("authenticated HTTP enforces identity, current org membership, private access, origins and MCP isolation", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const { auth, principals } = authentication();
   const origin = "https://app.example";
@@ -115,11 +115,11 @@ test("authenticated HTTP enforces identity, current org membership, private acce
     principals.alice = { userId: "alice", organizations: [{ id: "org-b", name: "B" }] };
     assert.equal((await request(`/api/canvases/${canvas.id}`, "alice")).status, 404, "even creators lose access when removed from org");
     assert.equal((await request(`/api/canvases/${canvas.id}/live-ticket`, "alice", { method: "POST", headers: { origin } })).status, 404);
-  } finally { await app.closeMcp(); repository.close(); }
+  } finally { await app.closeMcp(); await repository.close(); }
 });
 
 test("multi-org browser requests isolate the same user's canvases, comments and live tickets", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const { auth, principals } = authentication();
   const origin = "https://app.example";
@@ -151,11 +151,11 @@ test("multi-org browser requests isolate the same user's canvases, comments and 
     principals.multi = { userId: "multi", organizations: [{ id: "org-b", name: "B" }] };
     assert.equal((await request("/api/canvases", "org-a")).status, 403, "remembered selections cannot retain revoked access");
     assert.equal((await request("/api/canvases", "org-b")).status, 200);
-  } finally { await app.closeMcp(); repository.close(); }
+  } finally { await app.closeMcp(); await repository.close(); }
 });
 
 test("WebSockets require fresh tickets; replay and cross-canvas upgrades are rejected", { timeout: 10_000 }, async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const { auth } = authentication();
   // The public host need not equal the internal listener address behind a proxy.
@@ -167,8 +167,8 @@ test("WebSockets require fresh tickets; replay and cross-canvas upgrades are rej
   await once(server, "listening");
   const base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const clients: WebSocket[] = [];
-  const canvas = service.create(context, { title: "Live" });
-  const other = service.create(context, { title: "Other" });
+  const canvas = await service.create(context, { title: "Live" });
+  const other = await service.create(context, { title: "Other" });
   async function issue() {
     const response = await app.request(`${origin}/api/canvases/${canvas.id}/live-ticket`, {
       method: "POST", headers: { host: "localhost:3000", origin, authorization: "Bearer alice" },
@@ -211,6 +211,6 @@ test("WebSockets require fresh tickets; replay and cross-canvas upgrades are rej
     await new Promise<void>(resolve => server.close(() => resolve()));
     await new Promise<void>(resolve => live.sockets.close(() => resolve()));
     await app.closeMcp();
-    repository.close();
+    await repository.close();
   }
 });

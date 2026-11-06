@@ -51,28 +51,28 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
   const document = (reference: string) => canvases.get(context, id(reference));
   const withIdentity = (canvasId: string, value: Record<string, unknown>) => result({ canvasId, url: canvasUrl(canvasId, publicUrl), ...value });
 
-  tool("create_canvas", "Create a durable private canvas. Returns its stable ID and browser URL. Do not repeat automatically on reconnect.", z.strictObject({ title: z.string().trim().min(1).max(200) }), args => {
-    const canvas = canvases.create(context, args);
+  tool("create_canvas", "Create a durable private canvas. Returns its stable ID and browser URL. Do not repeat automatically on reconnect.", z.strictObject({ title: z.string().trim().min(1).max(200) }), async args => {
+    const canvas = await canvases.create(context, args);
     const { scene: _scene, ...metadata } = canvas;
     return withIdentity(canvas.id, metadata);
   });
-  tool("list_canvases", "List accessible canvases in the current organization, with stable browser URLs.", z.strictObject({}), () => result({ canvases: canvases.list(context).map(canvas => ({ ...canvas, url: canvasUrl(canvas.id, publicUrl) })) }), true);
-  tool("rename_canvas", "Creator only: rename this canvas without changing its scene, assets, visibility or comments. Pass expectedTitle from get_canvas. Same-name retries are safe; stale names return a conflict. Only rename when requested by the user.", renameCanvasSchema.extend({ canvasId: scope.canvasId }), args => {
+  tool("list_canvases", "List accessible canvases in the current organization, with stable browser URLs.", z.strictObject({}), async () => result({ canvases: (await canvases.list(context)).map(canvas => ({ ...canvas, url: canvasUrl(canvas.id, publicUrl) })) }), true);
+  tool("rename_canvas", "Creator only: rename this canvas without changing its scene, assets, visibility or comments. Pass expectedTitle from get_canvas. Same-name retries are safe; stale names return a conflict. Only rename when requested by the user.", renameCanvasSchema.extend({ canvasId: scope.canvasId }), async args => {
     const canvasId = id(args.canvasId);
     const { canvasId: _canvasId, ...input } = args;
-    return withIdentity(canvasId, canvases.rename(context, canvasId, input));
+    return withIdentity(canvasId, await canvases.rename(context, canvasId, input));
   });
-  tool("delete_canvas", "Creator only: permanently delete the canvas, all image assets and comments, and disconnect every live editor. No undo. Only use after the user explicitly confirms deletion. Read get_canvas and pass the exact current title as confirmTitle and current expectedRevision. Conflicts require fresh review and confirmation, never automatic retry. Missing canvases return 404.", deleteCanvasSchema.extend({ canvasId: scope.canvasId }), args => {
+  tool("delete_canvas", "Creator only: permanently delete the canvas, all image assets and comments, and disconnect every live editor. No undo. Only use after the user explicitly confirms deletion. Read get_canvas and pass the exact current title as confirmTitle and current expectedRevision. Conflicts require fresh review and confirmation, never automatic retry. Missing canvases return 404.", deleteCanvasSchema.extend({ canvasId: scope.canvasId }), async args => {
     const { canvasId, ...input } = args;
-    return result(canvases.delete(context, id(canvasId), input));
+    return result(await canvases.delete(context, id(canvasId), input));
   }, false, true);
-  tool("set_canvas_visibility", "Creator only: share this canvas with all current organization members (view and edit), or make it private. Change sharing only when the user explicitly asks. Never public. Read visibility first and pass expectedVisibility; repeat calls for the current visibility are safe. Existing live connections are not forcibly disconnected when made private.", changeVisibilitySchema.extend({ canvasId: scope.canvasId }), args => {
+  tool("set_canvas_visibility", "Creator only: share this canvas with all current organization members (view and edit), or make it private. Change sharing only when the user explicitly asks. Never public. Read visibility first and pass expectedVisibility; repeat calls for the current visibility are safe. Existing live connections are not forcibly disconnected when made private.", changeVisibilitySchema.extend({ canvasId: scope.canvasId }), async args => {
     const canvasId = id(args.canvasId);
     const { canvasId: _canvasId, ...input } = args;
-    return withIdentity(canvasId, canvases.setVisibility(context, canvasId, input));
+    return withIdentity(canvasId, await canvases.setVisibility(context, canvasId, input));
   }, false, true);
-  tool("get_canvas", "Reopen/read a canvas by ID or URL. Returns native elements, settings and revision. Image bytes are omitted unless includeFiles is true.", z.strictObject({ canvasId: scope.canvasId, includeFiles: z.boolean().default(false) }), args => {
-    const canvas = document(args.canvasId);
+  tool("get_canvas", "Reopen/read a canvas by ID or URL. Returns native elements, settings and revision. Image bytes are omitted unless includeFiles is true.", z.strictObject({ canvasId: scope.canvasId, includeFiles: z.boolean().default(false) }), async args => {
+    const canvas = await document(args.canvasId);
     const { scene, ...metadata } = canvas;
     return withIdentity(canvas.id, { ...metadata, elements: scene.elements, sharedSettings: scene.sharedSettings,
       ...(args.includeFiles ? { files: scene.files } : { assets: Object.values(scene.files).map(file => ({ id: file.id, mimeType: file.mimeType })) }) });
@@ -100,24 +100,24 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     const canvas = id(args.canvasId);
     return withIdentity(canvas, await drawing.edit(context, canvas, args.operations, args.expectedRevision, signal));
   });
-  tool("apply_mutations", "Advanced native-element mutation path, including raster image files. Preserve native versions, nonces, indices and tombstones. Use expectedRevision for read–modify–write.", mutationSchema.extend({ canvasId: scope.canvasId }), args => {
+  tool("apply_mutations", "Advanced native-element mutation path, including raster image files. Preserve native versions, nonces, indices and tombstones. Use expectedRevision for read–modify–write.", mutationSchema.extend({ canvasId: scope.canvasId }), async args => {
     const { canvasId, ...mutation } = args;
     const canvas = id(canvasId);
-    return withIdentity(canvas, canvases.mutate(context, canvas, mutation));
+    return withIdentity(canvas, await canvases.mutate(context, canvas, mutation));
   });
 
-  tool("get_element", "Read one live native element on the selected canvas.", z.strictObject({ canvasId: scope.canvasId, id: idSchema }), args => {
-    const canvas = document(args.canvasId);
+  tool("get_element", "Read one live native element on the selected canvas.", z.strictObject({ canvasId: scope.canvasId, id: idSchema }), async args => {
+    const canvas = await document(args.canvasId);
     return withIdentity(canvas.id, { revision: canvas.revision, element: activeElement(canvas, args.id) });
   }, true);
-  tool("get_selected_elements", "Read temporary selections grouped by connected editor tab. Returns each editorId, selected element IDs and their latest committed native data. An empty editors array means no connected editors; an editor with empty elementIds has no saved elements selected. Editor IDs change on reconnect. Unknown, deleted and unsaved elements are omitted. No global current tab is inferred and no image bytes are included.", z.strictObject({ canvasId: scope.canvasId }), args => {
+  tool("get_selected_elements", "Read temporary selections grouped by connected editor tab. Returns each editorId, selected element IDs and their latest committed native data. An empty editors array means no connected editors; an editor with empty elementIds has no saved elements selected. Editor IDs change on reconnect. Unknown, deleted and unsaved elements are omitted. No global current tab is inferred and no image bytes are included.", z.strictObject({ canvasId: scope.canvasId }), async args => {
     const canvas = id(args.canvasId);
-    return withIdentity(canvas, canvases.getSelectedElements(context, canvas));
+    return withIdentity(canvas, await canvases.getSelectedElements(context, canvas));
   }, true);
 
-  tool("get_comments", "Retrieve all unresolved pinned notes on this canvas. Returns commentsRevision (independent of the drawing revision), comment IDs, text, anchors and creation times. Element anchors use normalized u/v coordinates within the unrotated element bounds; their x/y are fallback scene coordinates, not the current position of a moved element. No threads or resolved-comment archive.", z.strictObject({ canvasId: scope.canvasId }), args => {
+  tool("get_comments", "Retrieve all unresolved pinned notes on this canvas. Returns commentsRevision (independent of the drawing revision), comment IDs, text, anchors and creation times. Element anchors use normalized u/v coordinates within the unrotated element bounds; their x/y are fallback scene coordinates, not the current position of a moved element. No threads or resolved-comment archive.", z.strictObject({ canvasId: scope.canvasId }), async args => {
     const canvas = id(args.canvasId);
-    const state = canvases.comments.get(context, canvas);
+    const state = await canvases.comments.get(context, canvas);
     return withIdentity(canvas, { commentsRevision: state.revision, comments: state.comments });
   }, true);
   tool("add_comment", "Add a persistent pinned note, visible live in open editors. Supply a canvas anchor for a fixed scene position, or an element anchor to follow a saved element as it moves/resizes/rotates. Text is plain text, at most 4,000 characters. Optionally supply a stable commentId UUID to make retries idempotent. Does not change the drawing revision.", z.strictObject({
@@ -125,20 +125,20 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     commentId: z.uuid().optional().describe("Optional client-generated UUID. Reuse with identical text/anchor when retrying an uncertain save."),
     text: createCommentSchema.shape.text,
     anchor: createCommentSchema.shape.anchor.describe("Canvas: {type:'canvas',x,y} in scene coordinates. Element: {type:'element',elementId,u,v,x,y}, where u/v are normalized 0..1 within its unrotated bounds and x/y are fallback scene coordinates. The element must exist on this canvas."),
-  }), args => {
+  }), async args => {
     const canvas = id(args.canvasId);
     const commentId = args.commentId ?? randomUUID();
-    const state = canvases.comments.create(context, canvas, { id: commentId, text: args.text, anchor: args.anchor });
+    const state = await canvases.comments.create(context, canvas, { id: commentId, text: args.text, anchor: args.anchor });
     return withIdentity(canvas, { commentId, commentsRevision: state.revision, comments: state.comments });
   });
-  tool("resolve_comment", "Resolve a pinned note by permanently deleting it from this canvas. Open editors update live. Safe to repeat if already absent; comments on other canvases are unaffected. Does not change the drawing revision. There is no resolved-comment archive or undo.", z.strictObject({ canvasId: scope.canvasId, commentId: z.uuid() }), args => {
+  tool("resolve_comment", "Resolve a pinned note by permanently deleting it from this canvas. Open editors update live. Safe to repeat if already absent; comments on other canvases are unaffected. Does not change the drawing revision. There is no resolved-comment archive or undo.", z.strictObject({ canvasId: scope.canvasId, commentId: z.uuid() }), async args => {
     const canvas = id(args.canvasId);
-    const state = canvases.comments.resolve(context, canvas, args.commentId);
+    const state = await canvases.comments.resolve(context, canvas, args.commentId);
     return withIdentity(canvas, { commentId: args.commentId, commentsRevision: state.revision, comments: state.comments });
   }, false, true);
 
-  tool("query_elements", "Query native elements by type, exact field filters, text substring, or origin coordinate range. Deleted elements are excluded by default.", z.strictObject({ canvasId: scope.canvasId, type: z.string().max(40).optional(), text: z.string().max(1000).optional(), filter: z.record(z.string(), z.unknown()).optional(), includeDeleted: z.boolean().default(false), bbox: z.strictObject({ x_min: z.number().optional(), x_max: z.number().optional(), y_min: z.number().optional(), y_max: z.number().optional() }).optional(), limit: z.number().int().min(1).max(1000).default(100), offset: z.number().int().min(0).default(0) }), args => {
-    const canvas = document(args.canvasId);
+  tool("query_elements", "Query native elements by type, exact field filters, text substring, or origin coordinate range. Deleted elements are excluded by default.", z.strictObject({ canvasId: scope.canvasId, type: z.string().max(40).optional(), text: z.string().max(1000).optional(), filter: z.record(z.string(), z.unknown()).optional(), includeDeleted: z.boolean().default(false), bbox: z.strictObject({ x_min: z.number().optional(), x_max: z.number().optional(), y_min: z.number().optional(), y_max: z.number().optional() }).optional(), limit: z.number().int().min(1).max(1000).default(100), offset: z.number().int().min(0).default(0) }), async args => {
+    const canvas = await document(args.canvasId);
     const matches = canvas.scene.elements.filter(element => {
       if (!args.includeDeleted && element.isDeleted || args.type && element.type !== args.type) return false;
       if (args.text && !String(element.text ?? "").toLowerCase().includes(args.text.toLowerCase())) return false;
@@ -148,37 +148,37 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
     });
     return withIdentity(canvas.id, { revision: canvas.revision, total: matches.length, elements: matches.slice(args.offset, args.offset + args.limit) });
   }, true);
-  tool("get_resource", "Read native document data, not browser-local libraries/theme/viewport. scene includes image bytes; elements returns the element array.", z.strictObject({ canvasId: scope.canvasId, resource: z.enum(["scene", "elements"]) }), args => {
-    const canvas = document(args.canvasId);
+  tool("get_resource", "Read native document data, not browser-local libraries/theme/viewport. scene includes image bytes; elements returns the element array.", z.strictObject({ canvasId: scope.canvasId, resource: z.enum(["scene", "elements"]) }), async args => {
+    const canvas = await document(args.canvasId);
     return withIdentity(canvas.id, { revision: canvas.revision, resource: args.resource === "elements" ? canvas.scene.elements : { type: "excalidraw", version: 2, source: "excalibur", elements: canvas.scene.elements, appState: canvas.scene.sharedSettings, files: canvas.scene.files } });
   }, true);
   tool("describe_scene", "Describe the canvas's types, positions, text, groups and native arrow connections without needing a browser.", z.strictObject({ canvasId: scope.canvasId }), async (args, signal) => {
-    const canvas = document(args.canvasId);
+    const canvas = await document(args.canvasId);
     return withIdentity(canvas.id, { revision: canvas.revision, ...describeScene(canvas.scene, await headless.bounds(canvas.scene.elements, signal)) });
   }, true);
 
-  const selectedWithLabels = (canvasId: string, elementIds: string[]) => {
-    const canvas = document(canvasId);
+  const selectedWithLabels = async (canvasId: string, elementIds: string[]) => {
+    const canvas = await document(canvasId);
     const selected = new Set(elementIds);
     for (const elementId of selected) activeElement(canvas, elementId);
     for (const element of canvas.scene.elements) if (!element.isDeleted && selected.has(element.containerId as string)) selected.add(element.id);
     return { canvas, selected: [...selected] };
   };
   tool("group_elements", "Group selected elements and bound labels, preserving existing nested groups.", z.strictObject({ ...scope, elementIds: ids }), async (args, signal) => {
-    const { canvas, selected } = selectedWithLabels(args.canvasId, args.elementIds);
+    const { canvas, selected } = await selectedWithLabels(args.canvasId, args.elementIds);
     const groupId = randomUUID();
     const update = await drawing.transform(context, canvas.id, selected, elements => elements.map(element => ({ op: "update", id: element.id, changes: { groupIds: [...(element.groupIds as string[] ?? []), groupId] } })), args.expectedRevision, signal);
     return withIdentity(canvas.id, { ...update, groupId });
   });
   tool("ungroup_elements", "Remove one named group from its canvas members, without touching other groups.", z.strictObject({ ...scope, groupId: idSchema }), async (args, signal) => {
-    const canvas = document(args.canvasId);
+    const canvas = await document(args.canvasId);
     const members = canvas.scene.elements.filter(element => !element.isDeleted && (element.groupIds as string[] | undefined)?.includes(args.groupId));
     if (!members.length) throw new ServiceError(404, "Group not found");
     const update = await drawing.transform(context, canvas.id, members.map(element => element.id), elements => elements.map(element => ({ op: "update", id: element.id, changes: { groupIds: (element.groupIds as string[]).filter(group => group !== args.groupId) } })), args.expectedRevision, signal);
     return withIdentity(canvas.id, update);
   });
   for (const locked of [true, false]) tool(locked ? "lock_elements" : "unlock_elements", `${locked ? "Lock" : "Unlock"} selected elements and their bound labels in the editor. Locking does not change canvas permissions.`, z.strictObject({ ...scope, elementIds: ids }), async (args, signal) => {
-    const { canvas, selected } = selectedWithLabels(args.canvasId, args.elementIds);
+    const { canvas, selected } = await selectedWithLabels(args.canvasId, args.elementIds);
     return withIdentity(canvas.id, await drawing.transform(context, canvas.id, selected, elements => elements.map(element => ({ op: "update", id: element.id, changes: { locked } })), args.expectedRevision, signal));
   });
   tool("align_elements", "Align selected bounding boxes atomically, moving their labels and rerouting bound arrows.", z.strictObject({ ...scope, elementIds: ids.min(2), alignment: z.enum(["left", "center", "right", "top", "middle", "bottom"]) }), async (args, signal) => {
@@ -206,31 +206,31 @@ export function createCanvasMcpServer(canvases: CanvasService, drawing: DrawingS
       return sorted.map(({ element, box }) => { const value = Number(element[axis]) + next - box[axis]; next += box[size] + gap; return { op: "update", id: element.id, changes: { [axis]: value } } as DrawingOperation; });
     }, args.expectedRevision, signal));
   });
-  tool("duplicate_elements", "Duplicate elements, their bound labels and selected frame children. Internal IDs/groups/bindings are remapped; links to unselected originals are detached.", z.strictObject({ ...scope, elementIds: ids, offsetX: z.number().min(-100000).max(100000).default(20), offsetY: z.number().min(-100000).max(100000).default(20) }), args => {
+  tool("duplicate_elements", "Duplicate elements, their bound labels and selected frame children. Internal IDs/groups/bindings are remapped; links to unselected originals are detached.", z.strictObject({ ...scope, elementIds: ids, offsetX: z.number().min(-100000).max(100000).default(20), offsetY: z.number().min(-100000).max(100000).default(20) }), async args => {
     const canvas = id(args.canvasId);
-    return withIdentity(canvas, drawing.duplicate(context, canvas, args.elementIds, args.offsetX, args.offsetY, args.expectedRevision));
+    return withIdentity(canvas, await drawing.duplicate(context, canvas, args.elementIds, args.offsetX, args.offsetY, args.expectedRevision));
   });
-  tool("clear_canvas", "Clear this canvas using versioned tombstones. Other canvases are untouched. Image bytes remain available for native undo.", z.strictObject(scope), args => {
+  tool("clear_canvas", "Clear this canvas using versioned tombstones. Other canvases are untouched. Image bytes remain available for native undo.", z.strictObject(scope), async args => {
     const canvas = id(args.canvasId);
-    return withIdentity(canvas, drawing.clear(context, canvas, args.expectedRevision));
+    return withIdentity(canvas, await drawing.clear(context, canvas, args.expectedRevision));
   }, false, true);
 
-  tool("export_scene", "Return a native .excalidraw JSON document, including image files. No server filesystem paths are accepted.", z.strictObject({ canvasId: scope.canvasId }), args => {
-    const canvas = document(args.canvasId);
+  tool("export_scene", "Return a native .excalidraw JSON document, including image files. No server filesystem paths are accepted.", z.strictObject({ canvasId: scope.canvasId }), async args => {
+    const canvas = await document(args.canvasId);
     return withIdentity(canvas.id, { revision: canvas.revision, scene: { type: "excalidraw", version: 2, source: "excalibur", elements: canvas.scene.elements, appState: canvas.scene.sharedSettings, files: canvas.scene.files } });
   }, true);
-  tool("import_scene", "Atomically import native scene data. Merge preserves unrelated elements and gives matching IDs fresh versions; replace tombstones omitted elements and requires expectedRevision. Only background color is retained from appState; browser-local state is ignored. No file paths or URLs.", z.strictObject({ ...scope, mode: z.enum(["merge", "replace"]).default("merge"), scene: z.strictObject({ type: z.literal("excalidraw").optional(), version: z.literal(2).optional(), source: z.string().optional(), elements: sceneSchema.shape.elements, appState: z.object({ viewBackgroundColor: sceneSchema.shape.sharedSettings.shape.viewBackgroundColor.default("#ffffff") }).passthrough().default({ viewBackgroundColor: "#ffffff" }), files: sceneSchema.shape.files.default({}) }) }), args => {
-    const canvas = document(args.canvasId);
+  tool("import_scene", "Atomically import native scene data. Merge preserves unrelated elements and gives matching IDs fresh versions; replace tombstones omitted elements and requires expectedRevision. Only background color is retained from appState; browser-local state is ignored. No file paths or URLs.", z.strictObject({ ...scope, mode: z.enum(["merge", "replace"]).default("merge"), scene: z.strictObject({ type: z.literal("excalidraw").optional(), version: z.literal(2).optional(), source: z.string().optional(), elements: sceneSchema.shape.elements, appState: z.object({ viewBackgroundColor: sceneSchema.shape.sharedSettings.shape.viewBackgroundColor.default("#ffffff") }).passthrough().default({ viewBackgroundColor: "#ffffff" }), files: sceneSchema.shape.files.default({}) }) }), async args => {
+    const canvas = await document(args.canvasId);
     drawing.checkRevision(canvas, args.expectedRevision);
     if (args.mode === "replace" && args.expectedRevision === undefined) throw new ServiceError(400, "Replacing a scene requires expectedRevision");
     const existing = new Map(canvas.scene.elements.map(element => [element.id, element]));
     const incomingIds = new Set(args.scene.elements.map(element => element.id));
     const elements = args.scene.elements.map(element => ({ ...element, version: Math.max(element.version, existing.get(element.id)?.version ?? 0) + 1, versionNonce: 0, updated: Date.now() }));
     if (args.mode === "replace") elements.push(...canvas.scene.elements.filter(element => !incomingIds.has(element.id) && !element.isDeleted).map(element => ({ ...element, isDeleted: true, version: element.version + 1, versionNonce: 0, updated: Date.now() })));
-    return withIdentity(canvas.id, canvases.mutate(context, canvas.id, { elements, files: args.scene.files, sharedSettings: { viewBackgroundColor: args.scene.appState.viewBackgroundColor }, expectedRevision: canvas.revision }));
+    return withIdentity(canvas.id, await canvases.mutate(context, canvas.id, { elements, files: args.scene.files, sharedSettings: { viewBackgroundColor: args.scene.appState.viewBackgroundColor }, expectedRevision: canvas.revision }));
   }, false, true);
   for (const name of ["export_to_image", "get_canvas_screenshot"]) tool(name, "Render a canvas or element subset headlessly with the pinned Excalidraw SDK. PNG is returned as MCP image content; SVG as an embedded resource. No open browser is required. Limits: 1,000 elements, 4096px, 8 megapixels, 15 seconds.", z.strictObject(renderFields), async (args, signal) => {
-    const canvas = document(args.canvasId);
+    const canvas = await document(args.canvasId);
     const { canvasId: _canvasId, ...options } = args;
     const rendered = await headless.render({ ...options, scene: canvas.scene }, signal);
     const metadata = { canvasId: canvas.id, revision: canvas.revision, format: rendered.format, width: rendered.width, height: rendered.height };

@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { createAdaptorServer } from "@hono/node-server";
@@ -10,7 +7,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { WebSocket } from "ws";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { ServiceError } from "../src/server/canvas/errors.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository, reopenTestRepository } from "./postgres.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
 import type { CanvasMetadata } from "../src/shared/canvas.js";
@@ -21,64 +18,62 @@ const member = { userId: "member", organizationId: "org-a" };
 const outsider = { userId: "owner", organizationId: "org-b" };
 const status = (expected: number) => (error: unknown) => error instanceof ServiceError && error.status === expected;
 
-test("sharing is creator-only, durable, idempotent and does not overwrite scenes or bypass org boundaries", () => {
-  const directory = mkdtempSync(join(tmpdir(), "excalibur-sharing-"));
-  const filename = join(directory, "test.sqlite");
-  let repository = new SqliteCanvasRepository(filename);
+test("sharing is creator-only, durable, idempotent and does not overwrite scenes or bypass org boundaries", async () => {
+  let repository = await createTestRepository();
   try {
     let service = new CanvasService(repository);
-    const canvas = service.create(owner, { title: "Shared canvas" });
-    service.mutate(owner, canvas.id, { elements: [{ id: "shape", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
-    const scene = service.get(owner, canvas.id).scene;
+    const canvas = await service.create(owner, { title: "Shared canvas" });
+    await service.mutate(owner, canvas.id, { elements: [{ id: "shape", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
+    const scene = (await service.get(owner, canvas.id)).scene;
     const share = { visibility: "organization", expectedVisibility: "private" };
-    assert.throws(() => service.setVisibility(member, canvas.id, share), status(404));
-    assert.throws(() => service.setVisibility(outsider, canvas.id, share), status(404));
+    await assert.rejects(async () => await service.setVisibility(member, canvas.id, share), status(404));
+    await assert.rejects(async () => await service.setVisibility(outsider, canvas.id, share), status(404));
     const metadata: CanvasMetadata[] = [];
-    const unsubscribe = service.subscribeMetadata(owner, canvas.id, value => metadata.push(value));
-    assert.throws(() => service.setVisibility(owner, canvas.id, { ...share, visibility: "public" }));
-    assert.throws(() => service.setVisibility(owner, canvas.id, { ...share, organizationId: "org-b" }));
-    assert.throws(() => service.setVisibility(owner, canvas.id, { visibility: "organization", expectedVisibility: "organization" }), status(409));
-    const shared = service.setVisibility(owner, canvas.id, share);
+    const unsubscribe = await service.subscribeMetadata(owner, canvas.id, value => metadata.push(value));
+    await assert.rejects(async () => await service.setVisibility(owner, canvas.id, { ...share, visibility: "public" }));
+    await assert.rejects(async () => await service.setVisibility(owner, canvas.id, { ...share, organizationId: "org-b" }));
+    await assert.rejects(async () => await service.setVisibility(owner, canvas.id, { visibility: "organization", expectedVisibility: "organization" }), status(409));
+    const shared = await service.setVisibility(owner, canvas.id, share);
     assert.equal(shared.visibility, "organization");
     assert.equal(shared.revision, 2);
-    assert.deepEqual(service.get(member, canvas.id).scene, scene);
-    assert.equal(service.list(member)[0]?.id, canvas.id);
-    assert.throws(() => service.get(outsider, canvas.id), status(404));
-    assert.throws(() => service.setVisibility(member, canvas.id, { visibility: "private", expectedVisibility: "organization" }), status(403));
-    assert.deepEqual(service.setVisibility(owner, canvas.id, share), shared, "a retry does not advance revision or publish again");
+    assert.deepEqual((await service.get(member, canvas.id)).scene, scene);
+    assert.equal((await service.list(member))[0]?.id, canvas.id);
+    await assert.rejects(async () => await service.get(outsider, canvas.id), status(404));
+    await assert.rejects(async () => await service.setVisibility(member, canvas.id, { visibility: "private", expectedVisibility: "organization" }), status(403));
+    assert.deepEqual(await service.setVisibility(owner, canvas.id, share), shared, "a retry does not advance revision or publish again");
     assert.equal(metadata.length, 1);
     unsubscribe();
     unsubscribe();
-    repository.close();
-    repository = new SqliteCanvasRepository(filename);
+    await repository.close();
+    repository = await reopenTestRepository(repository);
     service = new CanvasService(repository);
-    assert.equal(service.get(member, canvas.id).visibility, "organization");
-    const privateCanvas = service.setVisibility(owner, canvas.id, { visibility: "private", expectedVisibility: "organization" });
+    assert.equal((await service.get(member, canvas.id)).visibility, "organization");
+    const privateCanvas = await service.setVisibility(owner, canvas.id, { visibility: "private", expectedVisibility: "organization" });
     assert.equal(privateCanvas.revision, 3);
-    assert.deepEqual(service.get(owner, canvas.id).scene, scene);
-    assert.equal(service.list(member).length, 0);
-    assert.throws(() => service.get(member, canvas.id), status(404));
-    repository.close();
-    repository = new SqliteCanvasRepository(filename);
-    assert.equal(repository.get(canvas.id)?.visibility, "private");
+    assert.deepEqual((await service.get(owner, canvas.id)).scene, scene);
+    assert.equal((await service.list(member)).length, 0);
+    await assert.rejects(async () => await service.get(member, canvas.id), status(404));
+    await repository.close();
+    repository = await reopenTestRepository(repository);
+    assert.equal((await repository.get(canvas.id))?.visibility, "private");
     assert.equal(metadata.length, 1);
-  } finally { repository.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { await repository.close(); }
 });
 
-test("failed visibility persistence never publishes or changes committed access", t => {
-  const repository = new SqliteCanvasRepository(":memory:");
+test("failed visibility persistence never publishes or changes committed access", async t => {
+  const repository = await createTestRepository();
   try {
     const service = new CanvasService(repository);
-    const canvas = service.create(owner, { title: "Atomic sharing" });
+    const canvas = await service.create(owner, { title: "Atomic sharing" });
     let published = 0;
-    service.subscribe(owner, canvas.id, () => { published++; });
-    service.subscribeMetadata(owner, canvas.id, () => { published++; });
+    await service.subscribe(owner, canvas.id, () => { published++; });
+    await service.subscribeMetadata(owner, canvas.id, () => { published++; });
     t.mock.method(repository, "setVisibility", () => undefined);
-    assert.throws(() => service.setVisibility(owner, canvas.id, { visibility: "organization", expectedVisibility: "private" }), status(409));
+    await assert.rejects(async () => await service.setVisibility(owner, canvas.id, { visibility: "organization", expectedVisibility: "private" }), status(409));
     assert.equal(published, 0);
-    assert.equal(service.get(owner, canvas.id).revision, 0);
-    assert.throws(() => service.get(member, canvas.id), status(404));
-  } finally { repository.close(); }
+    assert.equal((await service.get(owner, canvas.id)).revision, 0);
+    await assert.rejects(async () => await service.get(member, canvas.id), status(404));
+  } finally { await repository.close(); }
 });
 
 function nextMessage(socket: WebSocket, type: ServerMessage["type"]): Promise<ServerMessage> {
@@ -92,7 +87,7 @@ function nextMessage(socket: WebSocket, type: ServerMessage["type"]): Promise<Se
 }
 
 test("HTTP, MCP and live clients enforce sharing and creator-only canvas management", { timeout: 15_000 }, async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   let app!: ReturnType<typeof createApp>;
   const live = createLiveServer();
@@ -139,7 +134,7 @@ test("HTTP, MCP and live clients enforce sharing and creator-only canvas managem
     return socket;
   };
   try {
-    const canvas = service.create(owner, { title: "Team drawing" });
+    const canvas = await service.create(owner, { title: "Team drawing" });
     const path = `/api/canvases/${canvas.id}`;
     assert.equal((await request(`${path}/live-ticket`, "member", { method: "POST" })).status, 404);
     const ownerSocket = await socketFor(canvas.id, "owner");
@@ -180,7 +175,7 @@ test("HTTP, MCP and live clients enforce sharing and creator-only canvas managem
     assert(!unshared.isError);
     const message = await memberMetadata;
     assert(message.type === "metadata" && message.metadata.visibility === "private");
-    assert.equal(service.get(owner, canvas.id).revision, 3);
+    assert.equal((await service.get(owner, canvas.id)).revision, 3);
     for (const suffix of ["", "/comments", "/live-ticket"]) {
       assert.equal((await request(`${path}${suffix}`, "member", suffix === "/live-ticket" ? { method: "POST" } : {})).status, 404);
     }
@@ -196,7 +191,7 @@ test("HTTP, MCP and live clients enforce sharing and creator-only canvas managem
       assert.equal((denied.structuredContent as { error: { status: number } }).error.status, 404);
     }
     const update = nextMessage(memberSocket, "update");
-    service.mutate(owner, canvas.id, { elements: [{ id: "owner-edit", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
+    await service.mutate(owner, canvas.id, { elements: [{ id: "owner-edit", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
     assert.equal((await update).type, "update", "existing live subscriptions are not forcibly revoked in this version");
     const renamedMetadata = nextMessage(ownerSocket, "metadata");
     const renamed = await ownerClient.callTool({ name: "rename_canvas", arguments: { canvasId: `${base}/canvases/${canvas.id}`, title: "Renamed canvas", expectedTitle: canvas.title } });
@@ -220,14 +215,14 @@ test("HTTP, MCP and live clients enforce sharing and creator-only canvas managem
     assert.equal((await ownerClosed)[0], 1008);
     assert.equal((await memberClosed)[0], 1008);
     for (const suffix of ["", "/comments", "/live-ticket"]) assert.equal((await request(`${path}${suffix}`, "owner", suffix === "/live-ticket" ? { method: "POST" } : {})).status, 404);
-    assert.equal(service.list(owner).length, 0);
-    const another = service.create(owner, { title: "MCP deletion" });
+    assert.equal((await service.list(owner)).length, 0);
+    const another = await service.create(owner, { title: "MCP deletion" });
     const deleteTool = (await ownerClient.listTools()).tools.find(item => item.name === "delete_canvas");
     assert.equal(deleteTool?.annotations?.destructiveHint, true);
     const deletedByAgent = await ownerClient.callTool({ name: "delete_canvas", arguments: { canvasId: another.id, confirmTitle: another.title, expectedRevision: 0 } });
     assert(!deletedByAgent.isError);
     assert.deepEqual(deletedByAgent.structuredContent, { canvasId: another.id, deleted: true });
-    assert.equal(repository.get(another.id), undefined);
+    assert.equal(await repository.get(another.id), undefined);
   } finally {
     for (const socket of sockets) socket.terminate();
     for (const socket of live.sockets.clients) socket.terminate();
@@ -235,6 +230,6 @@ test("HTTP, MCP and live clients enforce sharing and creator-only canvas managem
     await new Promise<void>(resolve => http.close(() => resolve()));
     await new Promise<void>(resolve => live.sockets.close(() => resolve()));
     await app.closeMcp();
-    repository.close();
+    await repository.close();
   }
 });

@@ -12,7 +12,7 @@ import { localRequestPolicy } from "../src/server/http/local-request.js";
 import { createApp } from "../src/server/http/app.js";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { developmentContext } from "../src/server/auth/context.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import { createLiveServer } from "../src/server/live/server.js";
 import { resolveCanvasId } from "../src/server/mcp/canvas-reference.js";
 import { requestId } from "../src/web/request-id.js";
@@ -41,7 +41,7 @@ test("dev --allow-local is explicit, configures both servers, and accepts pnpm's
 
 test("backend and Vite bind to all interfaces only with the shared LAN opt-in", () => {
   for (const enabled of [false, true]) {
-    const env = devEnvironment(enabled ? ["--allow-local"] : [], { ...process.env, HOST: "127.0.0.1", PORT: "3000", PUBLIC_URL: "http://127.0.0.1:5173" }, ["192.168.1.10"]);
+    const env = devEnvironment(enabled ? ["--allow-local"] : [], { ...process.env, PGHOST: "127.0.0.1", PGPORT: "5432", PGDATABASE: "excalibur", PGUSER: "excalibur", PGPASSWORD: "excalibur", HOST: "127.0.0.1", PORT: "3000", PUBLIC_URL: "http://127.0.0.1:5173" }, ["192.168.1.10"]);
     const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
       import { config } from './src/server/config.ts';
       import vite from './vite.config.ts';
@@ -53,7 +53,7 @@ test("backend and Vite bind to all interfaces only with the shared LAN opt-in", 
 });
 
 test("LAN opt-in allows only this host's local IPs and exact origins, preserving cross-site safeguards", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const normal = createApp(service, "dist/web", 3000);
   const lan = createApp(service, "dist/web", 3000, "http://192.168.1.10:5173", { allowLocal: true, localAddresses: ["192.168.1.10", "8.8.8.8"] });
@@ -66,23 +66,23 @@ test("LAN opt-in allows only this host's local IPs and exact origins, preserving
     for (const host of ["192.168.1.11", "8.8.8.8", "evil.test", "192.168.1.10.evil.test", "[invalid", "evil@192.168.1.10"]) assert.equal((await get(lan, host)).status, 403);
     for (const origin of ["http://192.168.1.11:5173", "http://192.168.1.10:9999", "https://evil.test", "null"]) assert.equal((await get(lan, "192.168.1.10:3000", { origin })).status, 403);
     assert.equal((await get(lan, "192.168.1.10:5173", { origin: "http://192.168.1.10:5173", "sec-fetch-site": "cross-site" })).status, 403);
-    const id = service.create(developmentContext, { title: "LAN reference" }).id;
+    const id = (await service.create(developmentContext, { title: "LAN reference" })).id;
     const policy = localRequestPolicy(3000, true, ["192.168.1.10"]);
     assert.equal(resolveCanvasId(`http://192.168.1.10:5173/canvases/${id}`, "http://localhost:5173", policy.origins), id);
     assert.throws(() => resolveCanvasId(`http://192.168.1.11:5173/canvases/${id}`, "http://localhost:5173", policy.origins));
     assert.throws(() => resolveCanvasId(`http://192.168.1.10:5173/canvases/${id}`, "http://localhost:5173"));
-  } finally { await normal.closeMcp(); await lan.closeMcp(); repository.close(); }
+  } finally { await normal.closeMcp(); await lan.closeMcp(); await repository.close(); }
 });
 
 test("LAN browser WebSockets accept the allowed origin but still reject unrelated LAN origins", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const app = createApp(service, "dist/web", 3000, "http://192.168.1.10:5173", { allowLocal: true, localAddresses: ["192.168.1.10"] });
   const live = createLiveServer();
   const server = createAdaptorServer({ fetch: app.fetch, websocket: live.adapter });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const id = service.create(developmentContext, { title: "iPad" }).id;
+  const id = (await service.create(developmentContext, { title: "iPad" })).id;
   const endpoint = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/api/canvases/${id}/live`;
   let socket: WebSocket | undefined;
   try {
@@ -101,7 +101,7 @@ test("LAN browser WebSockets accept the allowed origin but still reject unrelate
     await app.closeMcp();
     await new Promise<void>(resolve => live.sockets.close(() => resolve()));
     await new Promise<void>(resolve => server.close(() => resolve()));
-    repository.close();
+    await repository.close();
   }
 });
 

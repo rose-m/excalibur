@@ -19,7 +19,6 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node migrations ./migrations
 COPY --chown=node:node THIRD_PARTY_NOTICES.md ./
-RUN mkdir /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server/index.js"]

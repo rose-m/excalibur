@@ -56,7 +56,7 @@ export class DrawingService {
 
   async edit(context: OperationContext, canvasId: string, input: unknown, expectedRevision?: number, signal?: AbortSignal) {
     signal?.throwIfAborted();
-    const canvas = this.canvases.get(context, canvasId);
+    const canvas = await this.canvases.get(context, canvasId);
     this.checkRevision(canvas, expectedRevision);
     const operations = batchSchema.parse(input);
     const original = new Map(canvas.scene.elements.map(element => [element.id, element]));
@@ -278,12 +278,12 @@ export class DrawingService {
       changed.push(element);
     }
     signal?.throwIfAborted();
-    const update = this.canvases.mutate(context, canvasId, { elements: changed, expectedRevision: canvas.revision });
+    const update = await this.canvases.mutate(context, canvasId, { elements: changed, expectedRevision: canvas.revision }, signal);
     return { ...update, elementIds: results };
   }
 
-  clear(context: OperationContext, canvasId: string, expectedRevision?: number): SceneUpdate {
-    const canvas = this.canvases.get(context, canvasId);
+  async clear(context: OperationContext, canvasId: string, expectedRevision?: number): Promise<SceneUpdate> {
+    const canvas = await this.canvases.get(context, canvasId);
     this.checkRevision(canvas, expectedRevision);
     return this.canvases.mutate(context, canvasId, {
       expectedRevision: canvas.revision,
@@ -296,15 +296,15 @@ export class DrawingService {
   }
 
   async transform(context: OperationContext, canvasId: string, ids: string[], transform: (elements: Element[]) => DrawingOperation[] | Promise<DrawingOperation[]>, expectedRevision?: number, signal?: AbortSignal) {
-    const canvas = this.canvases.get(context, canvasId);
+    const canvas = await this.canvases.get(context, canvasId);
     this.checkRevision(canvas, expectedRevision);
     if (new Set(ids).size !== ids.length) throw new ServiceError(400, "Duplicate element IDs");
     const elements = ids.map(id => activeElement(canvas, id));
     return this.edit(context, canvasId, await transform(elements), canvas.revision, signal);
   }
 
-  duplicate(context: OperationContext, canvasId: string, ids: string[], offsetX: number, offsetY: number, expectedRevision?: number) {
-    const canvas = this.canvases.get(context, canvasId);
+  async duplicate(context: OperationContext, canvasId: string, ids: string[], offsetX: number, offsetY: number, expectedRevision?: number) {
+    const canvas = await this.canvases.get(context, canvasId);
     this.checkRevision(canvas, expectedRevision);
     const selected = new Set(ids);
     for (const id of ids) activeElement(canvas, id);
@@ -330,7 +330,7 @@ export class DrawingService {
       Object.assign(element, { index, version: 1, versionNonce: randomInt(0x7fffffff), seed: randomInt(0x7fffffff), updated: Date.now() });
       return element;
     });
-    const update = this.canvases.mutate(context, canvasId, { elements, expectedRevision: canvas.revision });
+    const update = await this.canvases.mutate(context, canvasId, { elements, expectedRevision: canvas.revision });
     return { ...update, idMap: Object.fromEntries(mapping) };
   }
 }

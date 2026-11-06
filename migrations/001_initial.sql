@@ -18,7 +18,8 @@ CREATE TABLE assets (
   canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
   asset_id TEXT NOT NULL,
   mime_type TEXT NOT NULL,
-  content BLOB NOT NULL,
-  created REAL NOT NULL,
+  content BYTEA NOT NULL,
+  -- Excalidraw file.created: client-provided Unix milliseconds, preserved verbatim.
+  created DOUBLE PRECISION NOT NULL,
   PRIMARY KEY (canvas_id, asset_id)
 );

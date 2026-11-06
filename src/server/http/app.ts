@@ -79,11 +79,11 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
     maxSize: 24 * 1024 * 1024,
     onError: (c) => c.json({ error: "Request exceeds 24 MiB" }, 413),
   }));
-  app.post("/api/canvases/:id/live-ticket", c => {
+  app.post("/api/canvases/:id/live-ticket", async c => {
     const origin = c.req.header("origin");
     if (!origin) throw new ServiceError(403, "Origin is required");
     const context = c.get("context");
-    service.get(context, c.req.param("id"));
+    await service.get(context, c.req.param("id"));
     return c.json(tickets.issue(context, c.req.param("id"), origin), 201);
   });
 

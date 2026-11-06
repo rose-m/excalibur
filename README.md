@@ -1,7 +1,7 @@
 # Excalibur
 
 A persistent Excalidraw service for humans and agents. The React editor supports
-live canvas collaboration with SQLite persistence. PropelAuth protects the web UI,
+live canvas collaboration with Postgres persistence. PropelAuth protects the web UI,
 HTTP API and WebSockets. The canvas-scoped HTTP MCP toolkit supports PropelAuth
 OAuth authentication for agents acting on behalf of users.
 
@@ -9,19 +9,23 @@ See the [high-level design](docs/high-level-design.md) for scope, architecture, 
 
 ## Development
 
-Requires Node.js **22.13+** and pnpm 9.1.0 (`corepack enable` to use the pinned version).
-SQLite uses Node's built-in `node:sqlite` module, which may emit an experimental
-warning on Node 22; no native database dependency or separate server is needed.
+Requires Node.js **22.13+**, pnpm 9.1.0 (`corepack enable` to use the pinned version),
+and Postgres 16+ (or Docker Compose for the bundled Postgres 17 service).
 
 ```sh
 pnpm install
+cp .env.example .env # For a fresh checkout; keep existing credentials otherwise.
+docker compose up -d postgres
 pnpm dev
 ```
 
 Open **http://127.0.0.1:5173**. Vite proxies HTTP and WebSocket calls to port 3000.
 Create a canvas and open its `/canvases/:id` URL in two tabs to edit together.
 Wait for “Live · Saved” before closing.
-Scenes and image bytes survive server restarts in `data/excalibur.sqlite`.
+Scenes, comments and image bytes survive server restarts in Postgres.
+Local Compose publishes Postgres at `127.0.0.1:55432` to avoid conflicting with
+other local databases. Set `PGPORT` in `.env` to choose another host port;
+connections between containers still use port 5432.
 
 For iPad or other devices on the same trusted network:
 
@@ -43,14 +47,28 @@ These safeguards are not a substitute for authentication.
 
 Configuration is read from environment variables; see `.env.example`. `pnpm dev`
 loads `.env` when present; existing shell variables take precedence. Other commands
-do not automatically load `.env`. `HOST`, `PORT`, `PUBLIC_URL`, and `DATABASE_PATH` are
-supported. Vite's proxy follows `PORT` (3000 by default).
+do not automatically load `.env`. `HOST`, `PORT`, and `PUBLIC_URL` configure the app.
+Postgres uses `PGHOST`, `PGPORT` (defaults to 5432), `PGDATABASE`, `PGUSER`, and
+`PGPASSWORD`. All except `PGPORT` are required. Passwords are passed directly to
+the driver, without URL encoding. Migrations run before the server starts.
+Vite's proxy follows `PORT` (3000 by default).
+
+Tests use a separate database and isolate each test repository in a temporary schema.
+The test user needs permission to create schemas. Create the database once:
+
+```sh
+docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" excalibur_test'
+```
+
+Tests use the same `PGHOST`, `PGPORT`, `PGUSER`, and `PGPASSWORD` settings (with
+local Compose defaults when unset), but always use `excalibur_test` rather than
+`PGDATABASE`. Export `TEST_DATABASE_URL` to override the entire test connection.
 
 ```sh
 pnpm typecheck
 pnpm test
 pnpm build
-AUTH_MODE=development pnpm start
+AUTH_MODE=development node --env-file=.env dist/server/index.js
 ```
 
 After building, **http://127.0.0.1:3000** serves both the UI and API. Editor fonts
@@ -326,7 +344,7 @@ Agents can also retrieve, add, and resolve notes through MCP.
 - Scenes preserve native element fields, bindings, ordering and deletion
   tombstones. Only the canvas background is a shared editor setting for now;
   viewport, selection, and other local state are not persisted.
-- Images are stored as separate SQLite blobs and returned only through the owning
+- Images are stored as separate Postgres `bytea` values and returned only through the owning
   canvas read. PNG, JPEG, GIF and WebP are supported; SVG imports are not yet
   supported. Limits: 5 MiB per image, 15 MiB total images, 24 MiB request/message
   and scene size, and 20,000 elements.
@@ -339,6 +357,9 @@ Agents can also retrieve, add, and resolve notes through MCP.
 - Clean reconnects reload an authoritative snapshot. If a connection is lost
   with local or unacknowledged edits, editing stops: export unsaved work, then
   explicitly reload. Offline edits are never silently replayed.
+- Per-canvas queues serialize writes and live room initialization within one app
+  instance. Postgres transactions and revision checks protect durable commits.
+  Run **one application replica**: rooms and live events are still process-local.
 
 HTTP endpoints: `GET/POST /api/canvases`, `GET/PUT/PATCH/DELETE /api/canvases/:id`, and
 `POST /api/canvases/:id/mutations`, plus `GET /health/live` / `GET /health/ready`.
@@ -352,6 +373,9 @@ element does not delete it; send a versioned `isDeleted` tombstone.
 
 WebSockets join `/api/canvases/:id/live`. Identity and ownership fields are never
 accepted from client payloads.
+Each socket can have at most 64 pending messages totaling 32 MiB, including the
+in-flight message. Overloaded connections close with code 1013 and must reconnect
+for an authoritative snapshot.
 
 ## Structure
 
@@ -362,7 +386,7 @@ accepted from client payloads.
   - `http/`: Hono API routes, middleware, and built-web-asset serving.
    - `live/`: canvas-scoped WebSocket subscriptions and heartbeat/backpressure handling.
    - `mcp/`: explicit-canvas HTTP MCP tools and protocol routing.
-  - `persistence/`: storage interfaces and SQLite adapter.
+  - `persistence/`: async storage interfaces and Postgres adapter.
   - `render/`: headless rendering.
 - `src/shared/`: transport schemas and shared types.
 - `migrations/`: versioned database migrations.
@@ -384,9 +408,25 @@ Compose explicitly defaults to local development auth. To enable PropelAuth, set
 in the Compose environment (or a private Compose `.env`). Route your HTTPS proxy
 to the loopback-published port and preserve the public Host header.
 The image contains the server, built web assets, fonts and migrations, and runs as
-a non-root user. SQLite lives on the named volume mounted at `/app/data`.
+a non-root user. Compose waits for Postgres to become healthy before starting the
+app. Postgres data lives on the `postgres-data` named volume; the app has no data
+volume. Change `PGPASSWORD` before the first deployment outside local
+development. Compose uses `PGUSER`, `PGPASSWORD`, and `PGDATABASE` to initialize
+the bundled database; changing them later does not update existing database roles
+or passwords. For an external database, set the `PG*` variables in your application
+deployment instead of using the bundled database service. Existing local database
+files are unused and are not migrated.
 
-For a consistent backup, stop the application, copy the entire data directory or
-volume, then restart it. Restore the whole dataset while the application is
-stopped, preserving permissions for the container's `node` user. Do not copy only
-the SQLite main file from a running service: its WAL may contain committed data.
+Back up the entire database, including assets and comments:
+
+```sh
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > excalibur.dump
+```
+
+Restore into an empty database while the app is stopped with `pg_restore`:
+
+```sh
+docker compose stop app
+docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < excalibur.dump
+docker compose start app
+```

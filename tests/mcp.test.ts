@@ -9,13 +9,13 @@ import { createApp } from "../src/server/http/app.js";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { DrawingService } from "../src/server/canvas/drawing.js";
 import { HeadlessService } from "../src/server/render/client.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import { developmentContext } from "../src/server/auth/context.js";
 import { resolveCanvasId } from "../src/server/mcp/canvas-reference.js";
 import type { Scene } from "../src/shared/canvas.js";
 
 test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering and reconnect", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const app = createApp(service, "dist/web", 3000);
   const http = createAdaptorServer({ fetch: app.fetch });
@@ -37,7 +37,7 @@ test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering
     const second = await call("create_canvas", { title: "Isolated" });
     const canvasId = first.canvasId as string;
     const published: number[] = [];
-    const unsubscribe = service.subscribe(developmentContext, canvasId, update => published.push(update.revision));
+    const unsubscribe = await service.subscribe(developmentContext, canvasId, update => published.push(update.revision));
     assert.equal(resolveCanvasId(first.url, "http://127.0.0.1:3000"), canvasId);
     assert.throws(() => resolveCanvasId(`https://evil.test/canvases/${canvasId}`, "http://127.0.0.1:3000"));
     await call("batch_create_elements", { canvasId: first.url, elements: [
@@ -47,48 +47,48 @@ test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering
       { id: "arrow", type: "arrow", x: 180, y: 40, startElementId: "a", endElementId: "b" },
     ] });
     const get = () => service.get(developmentContext, canvasId);
-    const element = (id: string) => get().scene.elements.find(e => e.id === id)!;
-    const label = get().scene.elements.find(e => e.containerId === "a")!;
+    const element = async (id: string) => (await get()).scene.elements.find(e => e.id === id)!;
+    const label = (await get()).scene.elements.find(e => e.containerId === "a")!;
     assert.equal(label.text, "First");
-    assert.equal((element("arrow").startBinding as any).elementId, "a");
-    assert(Number(element("arrow").width) > 150);
+    assert.equal(((await element("arrow")).startBinding as any).elementId, "a");
+    assert(Number((await element("arrow")).width) > 150);
     await call("update_element", { canvasId, id: "a", x: 50, text: "Changed" });
-    assert.equal(element(label.id).originalText, "Changed");
+    assert.equal((await element(label.id)).originalText, "Changed");
     await call("update_element", { canvasId, id: label.id, text: "Direct label" });
-    assert.equal(element(label.id).text, "Direct label");
+    assert.equal((await element(label.id)).text, "Direct label");
     await call("update_element", { canvasId, id: label.id, fontFamily: "mono" });
-    assert.equal(element(label.id).fontFamily, 3);
-    const revision = get().revision;
+    assert.equal((await element(label.id)).fontFamily, 3);
+    const revision = (await get()).revision;
     assert.equal(published.at(-1), revision);
     const broadcasts = published.length;
     const bad = await client.callTool({ name: "batch_mutate_elements", arguments: { canvasId, operations: [
       { op: "update", id: "a", changes: { x: 999 } }, { op: "delete", id: "missing" },
     ] } });
     assert(bad.isError);
-    assert.equal(get().revision, revision);
+    assert.equal((await get()).revision, revision);
     assert.equal(published.length, broadcasts);
     const stale = await client.callTool({ name: "update_element", arguments: { canvasId, id: "a", x: 999, expectedRevision: 0 } });
     assert(stale.isError);
     assert.equal((stale.structuredContent as any).error.status, 409);
     const group = await call("group_elements", { canvasId, elementIds: ["a", "b"] });
-    assert((element(label.id).groupIds as string[]).includes(group.groupId));
+    assert(((await element(label.id)).groupIds as string[]).includes(group.groupId));
     await call("lock_elements", { canvasId, elementIds: ["a"] });
-    assert.equal(element(label.id).locked, true);
+    assert.equal((await element(label.id)).locked, true);
     await call("align_elements", { canvasId, elementIds: ["a", "b", "c"], alignment: "top" });
-    assert.equal(element("a").y, element("b").y);
-    assert.equal(element(label.id).locked, true);
+    assert.equal((await element("a")).y, (await element("b")).y);
+    assert.equal((await element(label.id)).locked, true);
     await call("distribute_elements", { canvasId, elementIds: ["a", "b", "c"], direction: "horizontal" });
     await call("create_element", { canvasId, id: "negative-line", type: "line", x: 200, y: 300, points: [[0, 0], [-100, 100]], roughness: 0 });
     const described = await call("describe_scene", { canvasId });
     assert.equal(described.elements.find((e: any) => e.id === "negative-line").bounds.x, 100);
     await call("align_elements", { canvasId, elementIds: ["a", "negative-line"], alignment: "left" });
     const aligned = await call("describe_scene", { canvasId });
-    assert.equal(aligned.elements.find((e: any) => e.id === "negative-line").bounds.x, Number(element("a").x));
+    assert.equal(aligned.elements.find((e: any) => e.id === "negative-line").bounds.x, Number((await element("a")).x));
     await call("unlock_elements", { canvasId, elementIds: ["a"] });
     await call("ungroup_elements", { canvasId, groupId: group.groupId });
     const duplicate = await call("duplicate_elements", { canvasId, elementIds: ["a", "b", "arrow"] });
-    assert.equal((element(duplicate.idMap.arrow).startBinding as any).elementId, duplicate.idMap.a);
-    assert.equal(element(duplicate.idMap[label.id]).containerId, duplicate.idMap.a);
+    assert.equal(((await element(duplicate.idMap.arrow)).startBinding as any).elementId, duplicate.idMap.a);
+    assert.equal((await element(duplicate.idMap[label.id])).containerId, duplicate.idMap.a);
     assert((await call("query_elements", { canvasId, text: "Direct label" })).total >= 1);
     assert((await call("describe_scene", { canvasId })).connections.length >= 2);
     assert((await call("get_element", { canvasId, id: "a" })).element);
@@ -108,13 +108,13 @@ test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering
     const exported = await call("export_scene", { canvasId });
     await call("import_scene", { canvasId: second.canvasId, scene: { ...exported.scene, appState: { ...exported.scene.appState, scrollX: 123 } }, mode: "replace", expectedRevision: 0 });
     await call("delete_element", { canvasId, id: "a" });
-    assert(element(label.id).isDeleted);
-    assert.equal(element("arrow").startBinding, null);
-    assert(!service.get(developmentContext, second.canvasId).scene.elements.find(e => e.id === "a")!.isDeleted);
+    assert((await element(label.id)).isDeleted);
+    assert.equal((await element("arrow")).startBinding, null);
+    assert(!(await service.get(developmentContext, second.canvasId)).scene.elements.find(e => e.id === "a")!.isDeleted);
     await call("create_element", { canvasId, id: "single", type: "text", x: 0, y: 0, text: "Standalone" });
     await call("apply_mutations", { canvasId, elements: [], sharedSettings: { viewBackgroundColor: "#fafafa" } });
     await call("clear_canvas", { canvasId });
-    assert(get().scene.elements.every(e => e.isDeleted));
+    assert((await get()).scene.elements.every(e => e.isDeleted));
     await client.close();
     client = new Client({ name: "reconnected", version: "1" });
     await client.connect(new StreamableHTTPClientTransport(endpoint));
@@ -125,27 +125,87 @@ test("official HTTP MCP client: drawing toolkit, isolation, atomicity, rendering
     await client.close();
     await app.closeMcp();
     await new Promise<void>(resolve => http.close(() => resolve()));
-    repository.close();
+    await repository.close();
   }
 });
 
 test("async normalization rejects concurrent edits and cancellation without a partial commit", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const headless = new HeadlessService();
   const drawing = new DrawingService(service, headless);
-  const canvas = service.create(developmentContext, { title: "Concurrency" });
+  const canvas = await service.create(developmentContext, { title: "Concurrency" });
   try {
     const pending = drawing.edit(developmentContext, canvas.id, [{ op: "create", element: { id: "late", type: "rectangle", x: 0, y: 0 } }]);
-    service.mutate(developmentContext, canvas.id, { elements: [], sharedSettings: { viewBackgroundColor: "#123456" } });
+    await service.mutate(developmentContext, canvas.id, { elements: [], sharedSettings: { viewBackgroundColor: "#123456" } });
     await assert.rejects(pending, (error: any) => error.status === 409);
-    assert.equal(service.get(developmentContext, canvas.id).scene.elements.length, 0);
+    assert.equal((await service.get(developmentContext, canvas.id)).scene.elements.length, 0);
     const controller = new AbortController();
     controller.abort();
     await assert.rejects(drawing.edit(developmentContext, canvas.id, [{ op: "create", element: { id: "cancelled", type: "rectangle", x: 0, y: 0 } }], undefined, controller.signal));
-    assert.equal(service.get(developmentContext, canvas.id).scene.elements.length, 0);
-  } finally { await headless.close(); repository.close(); }
+    assert.equal((await service.get(developmentContext, canvas.id)).scene.elements.length, 0);
+  } finally { await headless.close(); await repository.close(); }
 });
+
+for (const phase of ["queued", "reading"] as const) {
+  test(`drawing cancellation while ${phase} cannot commit or publish`, { timeout: 15_000 }, async t => {
+    const repository = await createTestRepository();
+    const service = new CanvasService(repository);
+    const headless = new HeadlessService();
+    const drawing = new DrawingService(service, headless);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered!: () => void;
+    const paused = new Promise<void>(resolve => { entered = resolve; });
+    let blocking: Promise<unknown> | undefined;
+    let rejection: Promise<void> | undefined;
+    try {
+      const canvas = await service.create(developmentContext, { title: "Cancelled edit" });
+      await service.mutate(developmentContext, canvas.id, { elements: [{ id: "keep", type: "rectangle", version: 1, versionNonce: 1, isDeleted: false }] });
+      const before = await service.get(developmentContext, canvas.id);
+      let published = 0;
+      await service.subscribe(developmentContext, canvas.id, () => { published++; });
+      const commit = t.mock.method(repository, "commit");
+      if (phase === "queued") {
+        blocking = service.exclusive(canvas.id, () => gate);
+        const mutate = service.mutate.bind(service);
+        t.mock.method(service, "mutate", (...args: Parameters<CanvasService["mutate"]>) => {
+          const pending = mutate(...args);
+          entered();
+          return pending;
+        });
+      } else {
+        const get = repository.get.bind(repository);
+        let reads = 0;
+        t.mock.method(repository, "get", async (id: string) => {
+          const current = await get(id);
+          if (++reads === 2) { entered(); await gate; }
+          return current;
+        });
+      }
+      const controller = new AbortController();
+      const pending = drawing.edit(developmentContext, canvas.id, [{ op: "delete", id: "keep" }], undefined, controller.signal);
+      rejection = assert.rejects(pending, (error: unknown) => error instanceof Error && error.name === "AbortError");
+      await paused;
+      controller.abort();
+      release();
+      await rejection;
+      await blocking;
+      assert.equal(commit.mock.callCount(), 0);
+      assert.equal(published, 0);
+      assert.deepEqual(await service.get(developmentContext, canvas.id), before);
+      // An aborted mutation must not poison the queue for subsequent edits.
+      await service.mutate(developmentContext, canvas.id, { elements: [], sharedSettings: { viewBackgroundColor: "#123456" } });
+      assert.equal(published, 1);
+    } finally {
+      release();
+      await blocking;
+      await rejection;
+      await headless.close();
+      await repository.close();
+    }
+  });
+}
 
 test("headless rejects oversized output", async () => {
   const headless = new HeadlessService();

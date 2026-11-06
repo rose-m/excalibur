@@ -4,7 +4,7 @@ import { userDisplayNames } from "../src/server/auth/user-display-names.js";
 import type { Authentication } from "../src/server/auth/propelauth.js";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { createApp } from "../src/server/http/app.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { CanvasListItem } from "../src/shared/canvas.js";
 
 test("owner names prefer verified-profile usernames, then full names, never IDs or emails", async () => {
@@ -34,16 +34,16 @@ test("owner lookups are deduplicated and batched; a directory failure does not d
 });
 
 test("overview resolves owner names only for already-accessible canvases, without exposing directory records", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const viewer = { userId: "alice", organizationId: "org-a" };
   const bob = { userId: "bob", organizationId: "org-a" };
-  const own = service.create(viewer, { title: "Mine" });
-  const shared = service.create(bob, { title: "Shared" });
-  const anotherShared = service.create(bob, { title: "Also shared" });
-  for (const canvas of [shared, anotherShared]) service.setVisibility(bob, canvas.id, { visibility: "organization", expectedVisibility: "private" });
-  service.create({ userId: "private-owner", organizationId: "org-a" }, { title: "Not visible" });
-  service.create({ userId: "other-org-owner", organizationId: "org-b" }, { title: "Other org" });
+  const own = await service.create(viewer, { title: "Mine" });
+  const shared = await service.create(bob, { title: "Shared" });
+  const anotherShared = await service.create(bob, { title: "Also shared" });
+  for (const canvas of [shared, anotherShared]) await service.setVisibility(bob, canvas.id, { visibility: "organization", expectedVisibility: "private" });
+  await service.create({ userId: "private-owner", organizationId: "org-a" }, { title: "Not visible" });
+  await service.create({ userId: "other-org-owner", organizationId: "org-b" }, { title: "Other org" });
   const calls: string[][] = [];
   const principal = { userId: "alice", organizations: [{ id: "org-a", name: "A" }] };
   let offline = false;
@@ -77,5 +77,5 @@ test("overview resolves owner names only for already-accessible canvases, withou
     const withoutNames = await fallback.json() as CanvasListItem[];
     assert(withoutNames.every(canvas => canvas.ownerName === null));
     assert(!JSON.stringify(withoutNames).includes("sensitive"));
-  } finally { await app.closeMcp(); repository.close(); }
+  } finally { await app.closeMcp(); await repository.close(); }
 });

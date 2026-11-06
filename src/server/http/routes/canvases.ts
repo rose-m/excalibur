@@ -12,7 +12,7 @@ export function createCanvasRoutes(service: CanvasService, authentication?: Auth
 
   routes.get("/", async c => {
     // Derive lookup IDs exclusively from the already-authorized canvas list.
-    const canvases = service.list(c.get("context"));
+    const canvases = await service.list(c.get("context"));
     const ownerIds = [...new Set(canvases.map(canvas => canvas.creatorUserId))];
     let names: ReadonlyMap<string, string> = new Map();
     if (ownerIds.length && authentication?.getUserDisplayNames) {
@@ -25,25 +25,25 @@ export function createCanvasRoutes(service: CanvasService, authentication?: Auth
     return c.json(items);
   });
   routes.post("/", async (c) =>
-    c.json(service.create(c.get("context"), await readJson(c.req)), 201));
+    c.json(await service.create(c.get("context"), await readJson(c.req)), 201));
 
-  routes.get("/:id", (c) =>
-    c.json(service.get(c.get("context"), c.req.param("id"))));
+  routes.get("/:id", async (c) =>
+    c.json(await service.get(c.get("context"), c.req.param("id"))));
   routes.patch("/:id", async c =>
-    c.json(service.rename(c.get("context"), c.req.param("id"), await readJson(c.req))));
+    c.json(await service.rename(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.delete("/:id", async c =>
-    c.json(service.delete(c.get("context"), c.req.param("id"), await readJson(c.req))));
+    c.json(await service.delete(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.put("/:id", async (c) =>
-    c.json(service.save(c.get("context"), c.req.param("id"), await readJson(c.req))));
+    c.json(await service.save(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.post("/:id/mutations", async (c) =>
-    c.json(service.mutate(c.get("context"), c.req.param("id"), await readJson(c.req))));
+    c.json(await service.mutate(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.patch("/:id/visibility", async c =>
-    c.json(service.setVisibility(c.get("context"), c.req.param("id"), await readJson(c.req))));
+    c.json(await service.setVisibility(c.get("context"), c.req.param("id"), await readJson(c.req))));
   routes.get("/:id/live", liveCanvasRoute(service));
-  routes.get("/:id/comments", c => c.json(service.comments.get(c.get("context"), c.req.param("id"))));
-  routes.post("/:id/comments", async c => c.json(service.comments.create(c.get("context"), c.req.param("id"), await readJson(c.req)), 201));
-  routes.delete("/:id/comments/:commentId", c => c.json(service.comments.resolve(c.get("context"), c.req.param("id"), c.req.param("commentId"))));
-  routes.patch("/:id/comments/:commentId", async c => c.json(service.comments.edit(c.get("context"), c.req.param("id"), c.req.param("commentId"), await readJson(c.req))));
+  routes.get("/:id/comments", async c => c.json(await service.comments.get(c.get("context"), c.req.param("id"))));
+  routes.post("/:id/comments", async c => c.json(await service.comments.create(c.get("context"), c.req.param("id"), await readJson(c.req)), 201));
+  routes.delete("/:id/comments/:commentId", async c => c.json(await service.comments.resolve(c.get("context"), c.req.param("id"), c.req.param("commentId"))));
+  routes.patch("/:id/comments/:commentId", async c => c.json(await service.comments.edit(c.get("context"), c.req.param("id"), c.req.param("commentId"), await readJson(c.req))));
 
   routes.all("/", (c) => c.json({ error: "Method not allowed" }, 405));
   routes.all("/:id", (c) => c.json({ error: "Method not allowed" }, 405));

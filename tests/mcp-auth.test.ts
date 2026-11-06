@@ -14,15 +14,15 @@ import { CanvasService } from "../src/server/canvas/service.js";
 import { ServiceError } from "../src/server/canvas/errors.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 
 const authUrl = "https://auth.example";
 const aliceA = { userId: "alice", organizationId: "org-a" };
 const charlieB = { userId: "charlie", organizationId: "org-b" };
 const bobA = { userId: "bob", organizationId: "org-a" };
 
-function fixture(publicUrl = "https://draw.example") {
-  const repository = new SqliteCanvasRepository(":memory:");
+async function fixture(publicUrl = "https://draw.example") {
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const resource = `${publicUrl}/mcp`;
   const now = 1_800_000_000_000;
@@ -70,11 +70,11 @@ function fixture(publicUrl = "https://draw.example") {
     return app.request(`${publicUrl}${path}`, { ...init, headers });
   }
   return { repository, service, resource, now, claims, principals, tokens, state, authentication, mcpAuthentication, app, request,
-    close: async () => { await app.closeMcp(); repository.close(); } };
+    close: async () => { await app.closeMcp(); await repository.close(); } };
 }
 
 test("MCP introspection sends the OAuth bearer with separate Request Validation credentials", async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     assert.deepEqual(await f.mcpAuthentication.authenticate("Bearer alice-a"), aliceA);
     const request = f.state.requests[0]!;
@@ -94,7 +94,7 @@ test("MCP introspection sends the OAuth bearer with separate Request Validation 
 });
 
 test("MCP rejects malformed headers, inactive/expired tokens, wrong audience/issuer and missing user identity", async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     for (const header of [undefined, "Basic alice-a", "Bearer", "Bearer alice-a extra", "Bearer alice-a,Bearer bob-a", `Bearer ${"a".repeat(16_385)}`]) {
       await assert.rejects(() => f.mcpAuthentication.authenticate(header), error => error instanceof OAuthError && error.code === "invalid_token");
@@ -149,7 +149,7 @@ test("MCP rechecks token expiry after asynchronous account lookup, including the
 });
 
 test("MCP requires the organization scope and advertises it in OAuth challenges", async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     for (const value of [undefined, "", "mcp:tenant", "unrelated"]) {
       f.tokens.noscope = f.claims({ scope: value, users_org_permissions: [] });
@@ -168,7 +168,7 @@ test("MCP requires the organization scope and advertises it in OAuth challenges"
 });
 
 test("MCP uses the token-selected org, supports multiple memberships and never guesses missing orgs", async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     f.tokens["user-only"] = f.claims({ org_id: undefined });
     await assert.rejects(() => f.mcpAuthentication.authenticate("Bearer user-only"), error => error instanceof OAuthError && error.code === "invalid_token");
@@ -187,7 +187,7 @@ test("MCP uses the token-selected org, supports multiple memberships and never g
 });
 
 test("MCP account/membership checks and provider failures deny access without exposing upstream details", async () => {
-  const f = fixture();
+  const f = await fixture();
   const call = () => f.request("/mcp", { headers: { authorization: "Bearer alice-a" } });
   try {
     f.principals.alice = { userId: "alice", organizations: [{ id: "org-b", name: "B" }] };
@@ -215,7 +215,7 @@ test("MCP account/membership checks and provider failures deny access without ex
 });
 
 test("MCP allows every origin while retaining bearer auth and web API/WebSocket policies", async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     const foreign = { origin: "https://any-client.example", "sec-fetch-site": "cross-site" };
     for (const path of ["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"]) {
@@ -258,7 +258,7 @@ test("MCP allows every origin while retaining bearer auth and web API/WebSocket 
 });
 
 test("official SDK performs strict discovery, DCR, PKCE and code exchange against a simulated PropelAuth issuer", async () => {
-  const f = fixture();
+  const f = await fixture();
   let client: StoredOAuthClientInformation | undefined;
   let tokens: StoredOAuthTokens | undefined;
   let discovery: OAuthDiscoveryState | undefined;
@@ -328,7 +328,7 @@ test("official authenticated MCP clients enforce user/org boundaries and edits r
   http.listen(0, "127.0.0.1");
   await once(http, "listening");
   const publicUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
-  const f = fixture(publicUrl);
+  const f = await fixture(publicUrl);
   app = f.app;
   const clients: Client[] = [];
   let socket: WebSocket | undefined;
@@ -367,8 +367,8 @@ test("official authenticated MCP clients enforce user/org boundaries and edits r
     assert((await aliceB.callTool({ name: "get_canvas", arguments: { canvasId: canvas.canvasId } })).isError);
     const browserB = await f.request("/api/canvases", { headers: { authorization: "Bearer browser-alice", "x-organization-id": "org-b" } });
     assert.deepEqual((await browserB.json() as { id: string }[]).map(item => item.id), [canvasB.canvasId]);
-    const other = f.service.create(charlieB, { title: "Other organization" });
-    const bobPrivate = f.service.create(bobA, { title: "Bob private" });
+    const other = await f.service.create(charlieB, { title: "Other organization" });
+    const bobPrivate = await f.service.create(bobA, { title: "Bob private" });
     const bob = await connect("bob-a");
     for (const [client, id] of [[a, other.id], [a, bobPrivate.id], [bob, canvas.canvasId]] as const) {
       for (const name of ["get_canvas", "get_canvas_screenshot"]) {
@@ -432,11 +432,11 @@ test("development proxies preserve the canonical public MCP host for discovery a
     server: { host: "127.0.0.1", port: 0, strictPort: true, hmr: false, watch: null, proxy },
   });
   const client = new Client({ name: "vite-proxy-test", version: "1" });
-  let f: ReturnType<typeof fixture> | undefined;
+  let f: Awaited<ReturnType<typeof fixture>> | undefined;
   try {
     await vite.listen();
     const publicUrl = `http://127.0.0.1:${(vite.httpServer!.address() as AddressInfo).port}`;
-    f = fixture(publicUrl);
+    f = await fixture(publicUrl);
     app = f.app;
     const discovery = await fetch(`${publicUrl}/.well-known/oauth-protected-resource/mcp`);
     assert.equal(discovery.status, 200);

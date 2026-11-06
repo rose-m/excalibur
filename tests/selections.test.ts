@@ -11,53 +11,54 @@ import { ServiceError } from "../src/server/canvas/errors.js";
 import { developmentContext as context } from "../src/server/auth/context.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import { clientMessageSchema } from "../src/shared/live.js";
 
 const element = (id: string, version = 1, isDeleted = false) => ({ id, type: "rectangle", version, versionNonce: 1, isDeleted });
 
-test("editor selections are authorized, isolated, ephemeral, and resolve only current committed elements", () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+test("editor selections are authorized, isolated, ephemeral, and resolve only current committed elements", async () => {
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   try {
-    const canvas = service.create(context, { title: "Selection" });
-    const other = service.create(context, { title: "Other canvas" });
-    service.mutate(context, canvas.id, { elements: [element("a"), element("b")] });
-    service.mutate(context, other.id, { elements: [element("foreign")] });
-    const committed = service.get(context, canvas.id);
-    const a = service.connectEditor(context, canvas.id), b = service.connectEditor(context, canvas.id);
-    a.setSelection(["a", "a", "missing", "foreign"]);
-    b.setSelection(["b"]);
-    const selected = service.getSelectedElements(context, canvas.id);
+    const canvas = await service.create(context, { title: "Selection" });
+    const other = await service.create(context, { title: "Other canvas" });
+    await service.mutate(context, canvas.id, { elements: [element("a"), element("b")] });
+    await service.mutate(context, other.id, { elements: [element("foreign")] });
+    const committed = await service.get(context, canvas.id);
+    const a = await service.connectEditor(context, canvas.id), b = await service.connectEditor(context, canvas.id);
+    await a.setSelection(["a", "a", "missing", "foreign"]);
+    await b.setSelection(["b"]);
+    const selected = await service.getSelectedElements(context, canvas.id);
     assert.deepEqual(selected.editors.map(editor => editor.elementIds), [["a"], ["b"]]);
     assert.notEqual(selected.editors[0]!.editorId, selected.editors[1]!.editorId);
-    assert.deepEqual(service.getSelectedElements(context, other.id).editors, []);
-    assert.deepEqual(service.get(context, canvas.id), committed, "selection must not write metadata, scene or revision");
-    assert.throws(() => a.setSelection(["x".repeat(201)]));
-    assert.deepEqual(service.getSelectedElements(context, canvas.id), selected, "invalid selection must leave prior state intact");
-    service.mutate(context, canvas.id, { elements: [{ ...element("a", 2), width: 123 }, element("b", 2, true)] });
-    const latest = service.getSelectedElements(context, canvas.id);
+    assert.deepEqual((await service.getSelectedElements(context, other.id)).editors, []);
+    assert.deepEqual(await service.get(context, canvas.id), committed, "selection must not write metadata, scene or revision");
+    await assert.rejects(() => a.setSelection(["x".repeat(201)]));
+    assert.deepEqual(await service.getSelectedElements(context, canvas.id), selected, "invalid selection must leave prior state intact");
+    await service.mutate(context, canvas.id, { elements: [{ ...element("a", 2), width: 123 }, element("b", 2, true)] });
+    const latest = await service.getSelectedElements(context, canvas.id);
     assert.equal(latest.editors[0]!.elements[0]!.width, 123);
     assert.deepEqual(latest.editors[1]!.elementIds, []);
     const denied = (error: unknown) => error instanceof ServiceError && error.status === 404;
     for (const identity of [{ ...context, userId: "another user" }, { ...context, organizationId: "another organization" }]) {
-      assert.throws(() => service.getSelectedElements(identity, canvas.id), denied);
-      assert.throws(() => service.connectEditor(identity, canvas.id), denied);
+      await assert.rejects(async () => await service.getSelectedElements(identity, canvas.id), denied);
+      await assert.rejects(async () => await service.connectEditor(identity, canvas.id), denied);
     }
     a.close();
     a.close();
-    a.setSelection(["a"]);
-    assert.equal(service.getSelectedElements(context, canvas.id).editors.length, 1);
+    await a.setSelection(["a"]);
+    assert.equal((await service.getSelectedElements(context, canvas.id)).editors.length, 1);
     b.close();
-    const replacement = service.connectEditor(context, canvas.id);
+    const replacement = await service.connectEditor(context, canvas.id);
     a.close();
-    assert.equal(service.getSelectedElements(context, canvas.id).editors.length, 1);
-    assert.deepEqual(service.getSelectedElements(context, canvas.id).editors[0]!.elementIds, []);
-    assert(!selected.editors.some(editor => editor.editorId === service.getSelectedElements(context, canvas.id).editors[0]!.editorId));
-    assert.deepEqual(new CanvasService(repository).getSelectedElements(context, canvas.id).editors, [], "presence must not survive a service restart");
+    assert.equal((await service.getSelectedElements(context, canvas.id)).editors.length, 1);
+    assert.deepEqual((await service.getSelectedElements(context, canvas.id)).editors[0]!.elementIds, []);
+    const replacementId = (await service.getSelectedElements(context, canvas.id)).editors[0]!.editorId;
+    assert(!selected.editors.some(editor => editor.editorId === replacementId));
+    assert.deepEqual((await new CanvasService(repository).getSelectedElements(context, canvas.id)).editors, [], "presence must not survive a service restart");
     replacement.close();
-    assert.deepEqual(service.getSelectedElements(context, canvas.id).editors, []);
-  } finally { repository.close(); }
+    assert.deepEqual((await service.getSelectedElements(context, canvas.id)).editors, []);
+  } finally { await repository.close(); }
 });
 
 test("selection messages reject identity spoofing and bound payload sizes", () => {
@@ -73,7 +74,7 @@ test("selection messages reject identity spoofing and bound payload sizes", () =
 });
 
 test("MCP reads live per-tab selections, with no scene broadcasts or revisions and cleanup on disconnect", { timeout: 15_000 }, async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const app = createApp(service, "dist/web", 3000);
   const live = createLiveServer();
@@ -105,9 +106,9 @@ test("MCP reads live per-tab selections, with no scene broadcasts or revisions a
     return result.structuredContent as { revision: number; editors: { editorId: string; elementIds: string[]; elements: { id: string; version: number }[] }[] };
   }
   try {
-    const canvas = service.create(context, { title: "Connected" });
-    const other = service.create(context, { title: "Isolated" });
-    service.mutate(context, canvas.id, { elements: [element("a"), element("b")] });
+    const canvas = await service.create(context, { title: "Connected" });
+    const other = await service.create(context, { title: "Isolated" });
+    await service.mutate(context, canvas.id, { elements: [element("a"), element("b")] });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
     assert.deepEqual((await read(canvas.id)).editors, []);
     const a = await connect(canvas.id), b = await connect(canvas.id), isolated = await connect(other.id);
@@ -120,7 +121,7 @@ test("MCP reads live per-tab selections, with no scene broadcasts or revisions a
     assert.equal(first.revision, 1);
     await select(b, ["b", "b"]);
     assert.deepEqual((await read(canvas.id)).editors.map(editor => editor.elementIds), [["a"], ["b"]]);
-    assert.equal(service.get(context, canvas.id).revision, 1);
+    assert.equal((await service.get(context, canvas.id)).revision, 1);
     assert.deepEqual((await read(other.id)).editors.map(editor => editor.elementIds), [[]]);
     await select(a, []);
     assert.deepEqual((await read(canvas.id)).editors[0]!.elementIds, []);
@@ -128,20 +129,20 @@ test("MCP reads live per-tab selections, with no scene broadcasts or revisions a
     client = new Client({ name: "reconnected-mcp", version: "1" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
     assert.equal((await read(canvas.id)).editors[0]!.editorId, first.editors[0]!.editorId, "MCP reconnect must not replace browser presence");
-    const closed = once(b, "close"); b.close(); await closed;
+    const closed = once(b, "close"); await b.close(); await closed;
     assert.equal((await read(canvas.id)).editors.length, 1);
     const replacement = await connect(canvas.id);
     assert.deepEqual((await read(canvas.id)).editors.map(editor => editor.elementIds), [[], []]);
     assert.notEqual((await read(canvas.id)).editors[1]!.editorId, first.editors[1]!.editorId);
     for (const socket of [a, isolated, replacement]) { const closed = once(socket, "close"); socket.close(); await closed; }
     assert.deepEqual((await read(canvas.id)).editors, []);
-    assert.equal(service.get(context, canvas.id).revision, 1);
+    assert.equal((await service.get(context, canvas.id)).revision, 1);
   } finally {
     await client.close();
     for (const socket of sockets) socket.terminate();
     await app.closeMcp();
     await new Promise<void>(resolve => live.sockets.close(() => resolve()));
     await new Promise<void>(resolve => http.close(() => resolve()));
-    repository.close();
+    await repository.close();
   }
 });

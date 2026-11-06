@@ -7,7 +7,7 @@ import { CanvasService } from "../src/server/canvas/service.js";
 import { DrawingService } from "../src/server/canvas/drawing.js";
 import { developmentContext as context } from "../src/server/auth/context.js";
 import { HeadlessService } from "../src/server/render/client.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { Scene } from "../src/shared/canvas.js";
 
 test("generated Excalifont text dimensions match browser metrics rather than fallback fonts", async () => {
@@ -32,31 +32,31 @@ test("generated Excalifont text dimensions match browser metrics rather than fal
 });
 
 test("remeasuring legacy text repairs clipped dimensions without changing text, style or routed arrows", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const canvases = new CanvasService(repository);
   const headless = new HeadlessService();
   const drawing = new DrawingService(canvases, headless);
-  const canvas = canvases.create(context, { title: "Legacy font metrics" });
+  const canvas = await canvases.create(context, { title: "Legacy font metrics" });
   try {
     const text = "Node.js 22+ server · Hono · src/server";
     await drawing.edit(context, canvas.id, [
       { op: "create", element: { id: "note", type: "text", x: 20, y: 30, text, fontSize: 28, fontFamily: "excalifont", strokeColor: "#123456" } },
       { op: "create", element: { id: "arrow", type: "arrow", x: 50, y: 200, points: [[0, 0], [100, 0], [100, 200]], text: "REST + UI" } },
     ]);
-    const current = canvases.get(context, canvas.id);
+    const current = await canvases.get(context, canvas.id);
     const note = current.scene.elements.find(e => e.id === "note")!;
     const arrow = current.scene.elements.find(e => e.id === "arrow")!;
     const label = current.scene.elements.find(e => e.containerId === "arrow")!;
-    canvases.mutate(context, canvas.id, { expectedRevision: current.revision, elements: [
+    await canvases.mutate(context, canvas.id, { expectedRevision: current.revision, elements: [
       { ...note, width: 430.21289, version: note.version + 1 },
       { ...label, width: 91.2793, version: label.version + 1 },
     ] });
-    const revision = canvases.get(context, canvas.id).revision;
+    const revision = (await canvases.get(context, canvas.id)).revision;
     await drawing.edit(context, canvas.id, [
       { op: "update", id: "note", changes: { text } },
       { op: "update", id: label.id, changes: { text: label.originalText } },
     ], revision);
-    const repaired = canvases.get(context, canvas.id);
+    const repaired = await canvases.get(context, canvas.id);
     const nextNote = repaired.scene.elements.find(e => e.id === "note")!;
     const nextArrow = repaired.scene.elements.find(e => e.id === "arrow")!;
     const nextLabel = repaired.scene.elements.find(e => e.id === label.id)!;
@@ -68,24 +68,24 @@ test("remeasuring legacy text repairs clipped dimensions without changing text, 
     assert.deepEqual(nextArrow.points, arrow.points);
     assert.deepEqual([nextArrow.x, nextArrow.y], [arrow.x, arrow.y]);
     assert.equal(repaired.revision, revision + 1);
-  } finally { await headless.close(); repository.close(); }
+  } finally { await headless.close(); await repository.close(); }
 });
 
 test("moving and resizing shapes retain native routed arrows and binding metadata", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const canvases = new CanvasService(repository);
   const headless = new HeadlessService();
   const drawing = new DrawingService(canvases, headless);
-  const canvas = canvases.create(context, { title: "Routed" });
+  const canvas = await canvases.create(context, { title: "Routed" });
   try {
     await drawing.edit(context, canvas.id, [
       { op: "create", element: { id: "a", type: "rectangle", x: 0, y: 0, width: 100, height: 100 } },
       { op: "create", element: { id: "b", type: "rectangle", x: 400, y: 200, width: 100, height: 100 } },
       { op: "create", element: { id: "route", type: "arrow", x: 110, y: 50, points: [[0, 0], [80, 0], [80, 200], [280, 200]], startElementId: "a", endElementId: "b", text: "Keep bends" } },
     ]);
-    const original = canvases.get(context, canvas.id).scene.elements.find(e => e.id === "route")!;
+    const original = (await canvases.get(context, canvas.id)).scene.elements.find(e => e.id === "route")!;
     await drawing.edit(context, canvas.id, [{ op: "update", id: "a", changes: { x: -50, height: 150 } }]);
-    const updated = canvases.get(context, canvas.id).scene.elements.find(e => e.id === "route")!;
+    const updated = (await canvases.get(context, canvas.id)).scene.elements.find(e => e.id === "route")!;
     assert.equal((updated.points as number[][]).length, 4);
     for (const i of [1, 2]) {
       const a = (original.points as number[][])[i]!, b = (updated.points as number[][])[i]!;
@@ -95,53 +95,53 @@ test("moving and resizing shapes retain native routed arrows and binding metadat
     assert.deepEqual(updated.startBinding, original.startBinding);
     assert.deepEqual(updated.endBinding, original.endBinding);
     assert.notEqual(updated.x, original.x);
-  } finally { await headless.close(); repository.close(); }
+  } finally { await headless.close(); await repository.close(); }
 });
 
 test("native frames move with children and resize without skeleton conversion", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const canvases = new CanvasService(repository);
   const headless = new HeadlessService();
   const drawing = new DrawingService(canvases, headless);
-  const canvas = canvases.create(context, { title: "Frames" });
+  const canvas = await canvases.create(context, { title: "Frames" });
   try {
     const elements = await headless.convert([
       { id: "frame", type: "frame", x: 10, y: 20, width: 200, height: 100, name: "Frame", children: ["child"] },
       { id: "child", type: "rectangle", x: 30, y: 40, width: 50, height: 50 },
     ]);
-    canvases.mutate(context, canvas.id, { elements });
+    await canvases.mutate(context, canvas.id, { elements });
     await drawing.edit(context, canvas.id, [{ op: "update", id: "frame", changes: { x: 110, y: 120, width: 300 } }]);
-    const scene = canvases.get(context, canvas.id).scene;
+    const scene = (await canvases.get(context, canvas.id)).scene;
     const frame = scene.elements.find(e => e.id === "frame")!, child = scene.elements.find(e => e.id === "child")!;
     assert.deepEqual([frame.x, frame.y, frame.width, frame.name], [110, 120, 300, "Frame"]);
     assert.deepEqual([child.x, child.y, child.width, child.frameId], [130, 140, 50, "frame"]);
     assert(!Object.hasOwn(frame, "children"));
-  } finally { await headless.close(); repository.close(); }
+  } finally { await headless.close(); await repository.close(); }
 });
 
 test("linear points and dimensions stay consistent through creation and resizing", async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const canvases = new CanvasService(repository);
   const headless = new HeadlessService();
   const drawing = new DrawingService(canvases, headless);
-  const canvas = canvases.create(context, { title: "Lines" });
+  const canvas = await canvases.create(context, { title: "Lines" });
   try {
     await drawing.edit(context, canvas.id, [
       { op: "create", element: { id: "line", type: "line", x: 200, y: 0, points: [[0, 0], [-50, 30], [-100, 100]] } },
       { op: "create", element: { id: "arrow", type: "arrow", x: 0, y: 0, width: 100, height: 50 } },
     ]);
-    const read = (id: string) => canvases.get(context, canvas.id).scene.elements.find(e => e.id === id)!;
-    assert.equal(read("line").height, 100);
+    const read = async (id: string) => (await canvases.get(context, canvas.id)).scene.elements.find(e => e.id === id)!;
+    assert.equal((await read("line")).height, 100);
     await drawing.edit(context, canvas.id, [
       { op: "update", id: "line", changes: { width: 500, height: 200 } },
       { op: "update", id: "arrow", changes: { width: 500, height: 200 } },
     ]);
-    assert.deepEqual(read("line").points, [[0, 0], [-250, 60], [-500, 200]]);
-    assert.deepEqual(read("arrow").points, [[0, 0], [500, 200]]);
-    assert.deepEqual([read("arrow").width, read("arrow").height], [500, 200]);
+    assert.deepEqual((await read("line")).points, [[0, 0], [-250, 60], [-500, 200]]);
+    assert.deepEqual((await read("arrow")).points, [[0, 0], [500, 200]]);
+    assert.deepEqual([(await read("arrow")).width, (await read("arrow")).height], [500, 200]);
     await drawing.edit(context, canvas.id, [{ op: "update", id: "line", changes: { width: 999, points: [[0, 0], [-30, 40]] } }]);
-    assert.deepEqual([read("line").width, read("line").height], [30, 40]);
-  } finally { await headless.close(); repository.close(); }
+    assert.deepEqual([(await read("line")).width, (await read("line")).height], [30, 40]);
+  } finally { await headless.close(); await repository.close(); }
 });
 
 test("native geometry bounds handle negative points and rotated linear elements", async () => {

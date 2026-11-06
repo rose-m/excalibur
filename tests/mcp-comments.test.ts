@@ -11,13 +11,13 @@ import { CanvasService } from "../src/server/canvas/service.js";
 import { developmentContext as context } from "../src/server/auth/context.js";
 import { createApp } from "../src/server/http/app.js";
 import { createLiveServer } from "../src/server/live/server.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { CanvasComment } from "../src/shared/comments.js";
 
 type Reply = { canvasId: string; url: string; commentsRevision: number; comments: CanvasComment[]; commentId?: string };
 
 test("MCP comment tools retrieve, add and resolve through the shared live comment service", { timeout: 15_000 }, async () => {
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const service = new CanvasService(repository);
   const app = createApp(service, "dist/web", 3000);
   const live = createLiveServer();
@@ -33,10 +33,10 @@ test("MCP comment tools retrieve, add and resolve through the shared live commen
     return response.structuredContent as Reply;
   };
   try {
-    const canvas = service.create(context, { title: "Agent notes" });
-    const other = service.create(context, { title: "Other canvas" });
-    const privateCanvas = service.create({ ...context, userId: "another owner" }, { title: "Not accessible" });
-    service.mutate(context, canvas.id, { elements: [{ id: "box", type: "rectangle", x: 0, y: 0, width: 200, height: 100, version: 1, versionNonce: 1, isDeleted: false }] });
+    const canvas = await service.create(context, { title: "Agent notes" });
+    const other = await service.create(context, { title: "Other canvas" });
+    const privateCanvas = await service.create({ ...context, userId: "another owner" }, { title: "Not accessible" });
+    await service.mutate(context, canvas.id, { elements: [{ id: "box", type: "rectangle", x: 0, y: 0, width: 200, height: 100, version: 1, versionNonce: 1, isDeleted: false }] });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
     const tools = (await client.listTools()).tools;
     assert.equal(tools.find(tool => tool.name === "get_comments")?.annotations?.readOnlyHint, true);
@@ -54,7 +54,7 @@ test("MCP comment tools retrieve, add and resolve through the shared live commen
     assert.equal(added.commentsRevision, 1);
     const [data] = await broadcast;
     assert.deepEqual(JSON.parse(data.toString()), { type: "comments", state: { revision: 1, comments: added.comments } });
-    assert.equal(service.get(context, canvas.id).revision, 1);
+    assert.equal((await service.get(context, canvas.id)).revision, 1);
     assert.equal((await call("get_comments", { canvasId: other.id })).comments.length, 0);
 
     const commentId = randomUUID();
@@ -66,7 +66,7 @@ test("MCP comment tools retrieve, add and resolve through the shared live commen
     const retry = await call("add_comment", { canvasId: canvas.id, commentId, text: "Attached note", anchor });
     assert.equal(retry.commentsRevision, 2);
     assert.equal(retry.comments.length, 2);
-    assert.equal(service.get(context, canvas.id).revision, 1);
+    assert.equal((await service.get(context, canvas.id)).revision, 1);
 
     for (const [name, args, status] of [
       ["add_comment", { canvasId: canvas.id, commentId, text: "Changed content", anchor }, 409],
@@ -101,13 +101,13 @@ test("MCP comment tools retrieve, add and resolve through the shared live commen
     const last = await call("resolve_comment", { canvasId: canvas.id, commentId: added.commentId });
     assert.equal(last.commentsRevision, 4);
     assert.deepEqual(last.comments, []);
-    assert.equal(service.get(context, canvas.id).revision, 1);
+    assert.equal((await service.get(context, canvas.id)).revision, 1);
   } finally {
     await client.close();
     socket?.terminate();
     await app.closeMcp();
     await new Promise<void>(resolve => live.sockets.close(() => resolve()));
     await new Promise<void>(resolve => http.close(() => resolve()));
-    repository.close();
+    await repository.close();
   }
 });

@@ -1,20 +1,41 @@
 services:
   app:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     init: true
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${PGDATABASE:-excalibur}
+      PGUSER: ${PGUSER:-excalibur}
+      PGPASSWORD: ${PGPASSWORD:-excalibur}
       AUTH_MODE: ${AUTH_MODE:-development}
       PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:3000}
       PROPELAUTH_AUTH_URL: ${PROPELAUTH_AUTH_URL:-}
       PROPELAUTH_API_KEY: ${PROPELAUTH_API_KEY:-}
       PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID: ${PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID:-}
       PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET: ${PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET:-}
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: ${PGUSER:-excalibur}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-excalibur}
+      POSTGRES_DB: ${PGDATABASE:-excalibur}
+    ports:
+      - "127.0.0.1:${PGPORT:-55432}:5432"
     volumes:
-      - excalibur-data:/app/data
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  excalibur-data:
+  postgres-data:

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { CanvasService } from "../src/server/canvas/service.js";
 import { createApp } from "../src/server/http/app.js";
-import { SqliteCanvasRepository } from "../src/server/persistence/sqlite.js";
+import { createTestRepository } from "./postgres.js";
 import type { CanvasDocument } from "../src/shared/canvas.js";
 
 function createWebFixture() {
@@ -22,7 +22,7 @@ function createWebFixture() {
 
 test("HTTP lifecycle, conflicts, validation and local-only safeguards", async () => {
   const webDirectory = createWebFixture();
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const app = createApp(new CanvasService(repository), webDirectory, 3000);
   const server = createServer(getRequestListener(app.fetch));
   server.listen(0, "127.0.0.1");
@@ -62,14 +62,14 @@ test("HTTP lifecycle, conflicts, validation and local-only safeguards", async ()
     assert.equal((await fetch(`${base}/api/canvases`, { method: "DELETE" })).status, 405);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    repository.close();
+    await repository.close();
     rmSync(webDirectory, { recursive: true, force: true });
   }
 });
 
 test("Hono serves page URLs and static assets without exposing API fallbacks or filesystem paths", async () => {
   const webDirectory = createWebFixture();
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const app = createApp(new CanvasService(repository), webDirectory, 3000);
   function fetchApp(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
@@ -101,14 +101,14 @@ test("Hono serves page URLs and static assets without exposing API fallbacks or 
     }
     assert.equal((await fetchApp("/", { method: "POST" })).status, 405);
   } finally {
-    repository.close();
+    await repository.close();
     rmSync(webDirectory, { recursive: true, force: true });
   }
 });
 
 test("Hono bounds fixed-size and streamed request bodies", async () => {
   const webDirectory = createWebFixture();
-  const repository = new SqliteCanvasRepository(":memory:");
+  const repository = await createTestRepository();
   const app = createApp(new CanvasService(repository), webDirectory, 3000);
   const headers = { host: "localhost", "content-type": "application/json" };
   try {
@@ -141,7 +141,7 @@ test("Hono bounds fixed-size and streamed request bodies", async () => {
     assert.equal(streamed.status, 413);
     assert.deepEqual(await streamed.json(), { error: "Request exceeds 24 MiB" });
   } finally {
-    repository.close();
+    await repository.close();
     rmSync(webDirectory, { recursive: true, force: true });
   }
 });

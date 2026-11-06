@@ -4,7 +4,7 @@
 
 Excalibur is a deployable Excalidraw service for humans and agents. Humans use a web UI; agents use an authenticated remote MCP server. Both work on the same persistent canvases, with live updates from the start.
 
-The service ships as a container image. The first version runs as one application instance, with SQLite on a persistent volume and PropelAuth as the external identity provider.
+The service ships as a container image. It runs as one application instance, with Postgres for persistence and PropelAuth as the external identity provider.
 
 ## Initial scope
 
@@ -55,7 +55,7 @@ flowchart TB
         Canvas[Shared canvas service]
         Rooms[Per-canvas live rooms]
         Store[Persistence interfaces]
-        SQLite[SQLite adapter]
+        Postgres[Postgres adapter]
     end
 
     MCP --> Access
@@ -65,8 +65,8 @@ flowchart TB
     Canvas --> Rooms
     Rooms --> WS
     Canvas --> Store
-    Store --> SQLite
-    SQLite --> Volume[(Persistent volume)]
+    Store --> Postgres
+    Postgres --> Database[(Postgres database)]
     Access -. Identity validation .-> Auth[PropelAuth]
 ```
 
@@ -158,14 +158,14 @@ Joining a room and loading a snapshot must account for changes between the two o
 
 ## Persistence boundary
 
-SQLite is the initial implementation, not an application-wide dependency. Domain-oriented persistence interfaces cover:
+Postgres implements async domain-oriented persistence interfaces covering:
 
 - Canvas metadata, visibility, listing, and deletion.
 - Scene snapshot loading and atomic snapshot commits.
 - Server revision checks.
 - Image asset storage and retrieval.
 
-Keep transaction boundaries explicit: saving a scene and advancing its server revision must be atomic. Application code should not depend on SQLite SQL syntax, driver types, or filesystem paths.
+Keep transaction boundaries explicit: saving a scene and advancing its server revision must be atomic. Application code should not depend on database SQL syntax, driver types, or filesystem paths. Per-canvas application queues serialize mutations, comment changes and live room initialization. Database transactions protect snapshots and assets; comment writers lock the parent canvas row.
 
 Incremental network updates and snapshot persistence are independent choices. Store the current scene, not an event-sourced history. Per-element SQL rows and a permanent operation log are not initial requirements. If durable retry deduplication becomes necessary, add a bounded request ledger behind the persistence interface; do not use it as the source of canvas state.
 
@@ -203,7 +203,7 @@ This is a logical model, not a finalized SQL schema. The scene may also live dir
 
 The SDK's scene format contains `elements`, `appState`, and `files`; it does not prescribe a database schema. Excalidraw's open-source collaboration app persists scene element arrays and stores image assets separately. Its reconciliation uses element versions and deterministic tie-breaking rather than replaying an operation history. References: [scene format](https://docs.excalidraw.com/docs/codebase/json-schema), [upstream persistence](https://github.com/excalidraw/excalidraw/blob/master/excalidraw-app/data/firebase.ts), and [reconciliation](https://github.com/excalidraw/excalidraw/blob/master/packages/excalidraw/data/reconcile.ts).
 
-Use versioned database migrations from the start. A PostgreSQL adapter should later replace SQLite without changing transport handlers or canvas logic, but still requires schema and data migration. Multiple application replicas also require cross-instance room coordination and event distribution; replacing the database alone does not provide this.
+Versioned Postgres migrations run transactionally at startup under an advisory lock. No legacy data migration is provided. Multiple application replicas still require cross-instance room coordination and event distribution; Postgres alone does not provide this.
 
 ## MCP tool direction
 
@@ -233,7 +233,7 @@ Do not carry over the reference project's global canvas state, broadcast-to-all 
 ## Deployment and operations
 
 - Ship one application image containing the web assets and server.
-- Mount a persistent data directory for SQLite and any filesystem-backed assets.
+- Configure `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` for Postgres. Persist the database service's data directory; scenes and image assets are stored together in the database.
 - Configure PropelAuth, the public application URL, and runtime settings through environment variables or injected secrets.
 - Terminate HTTPS at the application or a trusted reverse proxy with WebSocket support.
 - Provide liveness/readiness endpoints and graceful shutdown.
