@@ -13,3 +13,10 @@ export function organizationStorageKey(userId: string) { return `excalibur:organ
 export function organizationUrl(organizationId: string, path = "/") {
   return `${path}?${new URLSearchParams({ organization: organizationId })}`;
 }
+
+export function removeOrganizationQuery(url: URL, history: History) {
+  url.searchParams.delete("organization");
+  // Preserve the router's history index/key so Back/Forward can be blocked when
+  // an editor has unsaved work. Clearing this state breaks POP navigation guards.
+  history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}

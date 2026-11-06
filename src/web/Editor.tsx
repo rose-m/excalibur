@@ -12,8 +12,11 @@ import { api } from "./api.js";
 import type { ReactNode } from "react";
 import { NavBar } from "./NavBar.js";
 import { CanvasActions } from "./CanvasActions.js";
+import { Link, useNavigate } from "react-router-dom";
+import { useUnsavedNavigation } from "./use-unsaved-navigation.js";
 
 export default function Editor({ canvas, authenticated = false, accountControls, userId }: { canvas: CanvasDocument; authenticated?: boolean; accountControls?: ReactNode; userId: string | undefined }) {
+  const navigate = useNavigate();
   const [metadata, setMetadata] = useState<CanvasMetadata>(canvas);
   const [deleted, setDeleted] = useState(false);
   const receiveDeletion = useCallback(() => setDeleted(true), []);
@@ -25,6 +28,8 @@ export default function Editor({ canvas, authenticated = false, accountControls,
   const [commentToolbar, setCommentToolbar] = useState<HTMLDivElement | null>(null);
   const receiveComments = useCallback((next: CommentState) => setComments(current => next.revision < current.revision ? current : next), []);
   const live = useRef<LiveCanvas | null>(null);
+  const shouldWarnBeforeLeaving = useCallback(() => !leavingAfterDelete.current && (live.current?.hasUnsavedChanges() ?? false), []);
+  useUnsavedNavigation(shouldWarnBeforeLeaving);
   // Keep recovery in a ref so effect replay/Fast Refresh cannot discard it.
   const recovery = useRef<LiveRecovery>();
   const initialData = useMemo(() => ({
@@ -57,11 +62,11 @@ export default function Editor({ canvas, authenticated = false, accountControls,
       {!deleted && <CanvasActions canvas={metadata} canManage={userId === metadata.creatorUserId} canSave={status.ready}
         onSave={() => live.current?.flush()} onUpdate={receiveMetadata} onDeleted={() => {
         leavingAfterDelete.current = true;
-        window.location.assign("/");
+        void navigate("/");
       }} />}
     </NavBar>
     {status.error && <div className="save-error" role="alert">
-      {status.error} {deleted ? <a href="/">Back to canvases</a> : <button onClick={() => window.location.reload()}>Reload canvas (discard unsaved edits)</button>}
+      {status.error} {deleted ? <Link to="/">Back to canvases</Link> : <button onClick={() => window.location.reload()}>Reload canvas (discard unsaved edits)</button>}
       <span> You can export your drawing from the editor menu before reloading.</span>
     </div>}
     <div className="editor-surface">

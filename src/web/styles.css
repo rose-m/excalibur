@@ -21,6 +21,20 @@ input { flex: 1; min-width: 0; border: 1px solid #d9d7eb; border-radius: 8px; pa
 .canvas-card:hover { border-color: #8c83db; }
 .canvas-card h2 { font-size: 20px; margin: 0 0 20px; overflow-wrap: anywhere; }
 .canvas-card p { font-size: 13px; margin: 0; }
+.canvas-list-controls { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 32px 0 16px; }
+.canvas-tabs { display: flex; gap: 4px; padding: 4px; border: 1px solid #e3e1ef; border-radius: 10px; background: #f0eff7; flex-shrink: 0; }
+.canvas-tabs button { display: flex; align-items: center; gap: 8px; padding: 9px 14px; background: transparent; color: #79738f; font-size: 13px; font-weight: 500; }
+.canvas-tabs button:hover { color: #5148b8; background: #e9e6f5; }
+.canvas-tabs button[aria-selected="true"] { background: white; color: #5148b8; box-shadow: 0 1px 4px #25243c12; }
+.canvas-tab-count { min-width: 20px; padding: 1px 5px; border-radius: 5px; background: #e7e4f1; font-size: 11px; text-align: center; }
+.canvas-tabs [aria-selected="true"] .canvas-tab-count { background: #f0ecfc; }
+.canvas-search { display: flex; align-items: center; gap: 8px; width: 300px; max-width: 100%; padding: 0 12px; border: 1px solid #d9d7eb; border-radius: 9px; background: white; color: #89849b; }
+.canvas-search:focus-within { outline: 3px solid #a5a0ef; outline-offset: 3px; }
+.canvas-search svg { flex-shrink: 0; }
+.canvas-search input { width: 100%; border: 0; padding: 11px 0; font-size: 13px; outline: none; }
+.canvas-search input:focus-visible { outline: none; }
+.canvas-results { color: #89849b; font-size: 12px; margin: 0 0 16px; }
+.canvas-list [role="tabpanel"]:focus-visible { outline: 3px solid #a5a0ef; outline-offset: 6px; border-radius: 8px; }
 .local-notice { margin-top: 48px; font-size: 13px; color: #79768c; }
 .error, .save-error { color: #9b2727; }
 .app-shell { height: 100dvh; display: flex; flex-direction: column; }
@@ -100,6 +114,9 @@ button.danger:hover { background: #852828; }
 @media (max-width: 600px) {
   .canvas-list { padding: 32px 16px; }
   .create-row { flex-direction: column; }
+  .canvas-list-controls { align-items: stretch; flex-direction: column; gap: 12px; }
+  .canvas-tabs { align-self: flex-start; }
+  .canvas-search { width: 100%; }
   .app-nav nav { gap: 8px; padding: 10px; }
   .app-nav h1 { font-size: 14px; }
   .nav-home span { display: none; }

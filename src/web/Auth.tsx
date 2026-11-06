@@ -2,12 +2,18 @@ import { RedirectToLogin, RequiredAuthProvider, useAuthInfo, useLogoutFunction }
 import { useEffect, useRef, useState } from "react";
 import { App } from "./App.js";
 import { api, configureApi } from "./api.js";
-import { organizationStorageKey, organizationUrl, selectOrganization } from "./organizations.js";
+import { organizationStorageKey, organizationUrl, removeOrganizationQuery, selectOrganization } from "./organizations.js";
 import type { Organization } from "./organizations.js";
 import { NavBar } from "./NavBar.js";
 import { AccountMenu } from "./AccountMenu.js";
 
 type AuthConfig = { mode: "development" } | { mode: "propelauth"; authUrl: string };
+
+function SignInRedirect() {
+  // Resolve on logout, not when the provider first mounted: SPA navigation may
+  // have moved to a different canvas since the original page load.
+  return <RedirectToLogin postLoginRedirectUrl={window.location.href} />;
+}
 
 function SignedInApp() {
   const auth = useAuthInfo();
@@ -35,8 +41,7 @@ function SignedInApp() {
         if (organizationId) window.sessionStorage.setItem(key, organizationId);
         else window.sessionStorage.removeItem(key);
       } catch { /* The current page still works without storage. */ }
-      url.searchParams.delete("organization");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      removeOrganizationQuery(url, window.history);
       organization.current = organizationId;
       setAccount({ organizations: principal.organizations, organizationId });
     }).catch((error: Error) => { if (active) setError(error.message); });
@@ -75,8 +80,8 @@ export function Auth() {
   if (error) return <main className="canvas-list" role="alert">{error} <a href="/">Try again</a></main>;
   if (!config) return <main className="canvas-list" role="status">Loading…</main>;
   if (config.mode === "development") return <App />;
-  return <RequiredAuthProvider authUrl={config.authUrl} displayWhileLoading={<main className="canvas-list">Signing in…</main>}
-    displayIfLoggedOut={<RedirectToLogin postLoginRedirectUrl={window.location.href} />}>
+  return <RequiredAuthProvider authUrl={config.authUrl} displayWhileLoading={<main className="canvas-list">Checking session…</main>}
+    displayIfLoggedOut={<SignInRedirect />}>
     <SignedInApp />
   </RequiredAuthProvider>;
 }

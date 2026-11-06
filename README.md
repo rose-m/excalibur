@@ -97,6 +97,15 @@ checked against PropelAuth on every HTTP request and ticket issuance; auth
 service failures deny access. This deliberately trades an extra network call for
 fresh authorization. Private canvases remain creator-only within their org.
 
+Normal links between the canvas list and editor use client-side navigation. The
+PropelAuth provider stays mounted, so page changes do not restart the session
+check. The initial provider-loading message is **Checking session…**, not a new
+login. Canvas creation and confirmed deletion also navigate without reloading.
+Unsaved edits require confirmation before internal navigation or browser
+Back/Forward; full page exits still use the browser's native unsaved-change warning.
+Organization switching and explicit recovery/reload actions deliberately retain
+full page loads so workspace credentials and live connections cannot carry over.
+
 For live editing, the browser first calls
 `POST /api/canvases/:id/live-ticket` with its bearer token and `Origin`. It then
 connects to `/api/canvases/:id/live?ticket=...`. Tickets are random, single-use,
@@ -225,6 +234,15 @@ requires your dashboard setup and is a separate acceptance check.
 
 `AUTH_MODE=development` retains the unauthenticated local-only MCP endpoint at
 `http://127.0.0.1:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
+
+## Browse canvases
+
+The canvas list has **My canvases** and **Org shared** tabs for the selected
+organization. My canvases includes private and shared canvases you created.
+Org shared includes every organization-visible canvas, including your own shared
+ones. Search filters canvas names in the active tab, ignoring case and surrounding
+spaces. The query stays in place when switching tabs. Tab counts show each group's
+total; the result count reflects the search. No thumbnail previews are loaded.
 
 ## Rename and delete canvases
 

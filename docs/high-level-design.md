@@ -74,6 +74,10 @@ flowchart TB
 
 The browser hosts the Excalidraw editor, a canvas list, and canvas creation and visibility controls. The canvas list includes the user's private canvases and organization-visible canvases in the selected organization. A sole membership opens automatically; multiple memberships show a picker. Selection is remembered per user and tab and revalidated on load. Every browser API request validates the selected organization against current membership. Accounts with zero memberships cannot access canvases. Switching organizations navigates to a fresh canvas list, closes the previous live connection, and retains the editor's unsaved-change prompt.
 
+The canvas list separates **My canvases** (created by the current user, regardless of visibility) from **Org shared** (all organization-visible canvases, including the user's own). Case-insensitive title search filters the active tab and retains the query when switching tabs. Group counts show totals; the result count reflects the current search. There are no thumbnail previews.
+
+Client-side routing keeps the PropelAuth provider mounted across normal page navigation, creation and confirmed deletion. Unsaved edits block route changes, including browser Back/Forward, until the user confirms. Native before-unload protection still applies to full page exits. Organization switches and explicit recovery reloads remain full page navigations.
+
 The editor loads a canvas snapshot, joins its live room, and sends incremental edits. Viewport, selection, and other local editor state should remain local unless explicitly introduced as a collaboration feature.
 
 ### Shared canvas service

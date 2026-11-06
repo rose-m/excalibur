@@ -1,5 +1,12 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "rootDir": ".", "noEmit": true, "jsx": "react-jsx" },
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node", "vite/client"]
+  },
   "include": ["tests/**/*.ts", "scripts/**/*.ts", "vite.config.ts", "src/server/**/*.ts", "src/shared/**/*.ts"]
 }

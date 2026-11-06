@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { organizationStorageKey, organizationUrl, selectOrganization } from "../src/web/organizations.js";
+import { organizationStorageKey, organizationUrl, removeOrganizationQuery, selectOrganization } from "../src/web/organizations.js";
+import { JSDOM } from "jsdom";
 
 const a = { id: "org-a", name: "A" };
 const b = { id: "org-b", name: "B" };
@@ -23,4 +24,15 @@ test("browser selection is user-scoped and switching returns to the list while i
   assert.equal(organizationUrl(b.id), "/?organization=org-b");
   assert.equal(organizationUrl(a.id, "/canvases/id"), "/canvases/id?organization=org-a");
   assert.equal(organizationUrl("a&b"), "/?organization=a%26b");
+});
+
+test("cleaning the organization query preserves router history state and other URL fields", () => {
+  const dom = new JSDOM("", { url: "https://draw.example/canvases/id?organization=org-b&other=value#anchor" });
+  try {
+    const state = { idx: 3, key: "router-entry", usr: { from: "canvases" } };
+    dom.window.history.replaceState(state, "");
+    removeOrganizationQuery(new URL(dom.window.location.href), dom.window.history);
+    assert.deepEqual(dom.window.history.state, state);
+    assert.equal(dom.window.location.href, "https://draw.example/canvases/id?other=value#anchor");
+  } finally { dom.window.close(); }
 });

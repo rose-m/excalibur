@@ -5,13 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { NavBar } from "../src/web/NavBar.js";
 import { AccountMenu } from "../src/web/AccountMenu.js";
+import { StaticRouter } from "react-router-dom";
 
 test("canvas navigation keeps canvas, save and account controls in one bar", () => {
-  const markup = renderToStaticMarkup(createElement(NavBar, {
+  const markup = renderToStaticMarkup(createElement(StaticRouter, { location: "/" }, createElement(NavBar, {
     title: "A long canvas title <test>",
     accountControls: createElement(AccountMenu, { email: "alice@example.com", organizations: [{ id: "org-a", name: "Organization A" }],
       organizationId: "org-a", onSignOut: () => {} }),
-  }, createElement("span", { role: "status" }, "Live · Saved"), createElement("button", null, "Save now")));
+  }, createElement("span", { role: "status" }, "Live · Saved"), createElement("button", null, "Save now"))));
   const dom = new JSDOM(markup);
   try {
     const document = dom.window.document;
@@ -29,7 +30,7 @@ test("canvas navigation keeps canvas, save and account controls in one bar", () 
 
 test("navigation without a canvas title shows the home brand and optional account controls", () => {
   for (const accountControls of [undefined, createElement("button", null, "Sign out")]) {
-    const dom = new JSDOM(renderToStaticMarkup(createElement(NavBar, { accountControls })));
+    const dom = new JSDOM(renderToStaticMarkup(createElement(StaticRouter, { location: "/" }, createElement(NavBar, { accountControls }))));
     try {
       const document = dom.window.document;
       assert.equal(document.querySelectorAll("header").length, 1);
