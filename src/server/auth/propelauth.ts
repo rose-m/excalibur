@@ -1,5 +1,6 @@
 import { initBaseAuth } from "@propelauth/node";
 import { ServiceError } from "../canvas/errors.js";
+import { userDisplayNames } from "./user-display-names.js";
 
 export type Principal = Readonly<{
   userId: string;
@@ -10,6 +11,7 @@ export type Authentication = {
   authUrl: string;
   authenticate: (authorization: string | undefined) => Promise<Principal>;
   getPrincipal: (userId: string) => Promise<Principal>;
+  getUserDisplayNames?: (userIds: readonly string[]) => Promise<ReadonlyMap<string, string>>;
 };
 
 export function propelAuthentication(authUrl: string, apiKey: string): Authentication {
@@ -29,6 +31,7 @@ export function propelAuthentication(authUrl: string, apiKey: string): Authentic
   return {
     authUrl,
     getPrincipal,
+    getUserDisplayNames: userIds => userDisplayNames(userIds, ids => auth.fetchBatchUserMetadataByUserIds(ids, false)),
     async authenticate(authorization) {
       let user;
       try { user = await auth.validateAccessTokenAndGetUserClass(authorization); }

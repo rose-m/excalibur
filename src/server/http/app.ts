@@ -88,7 +88,7 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
   });
 
   app.route("/health", healthRoutes);
-  app.route("/api/canvases", createCanvasRoutes(service));
+  app.route("/api/canvases", createCanvasRoutes(service, authentication));
   app.route("/mcp", mcp.routes);
   // Unknown API routes must never fall through to static web assets.
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));

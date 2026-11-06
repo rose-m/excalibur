@@ -76,3 +76,6 @@ export type CanvasMetadata = {
   updatedAt: string;
 };
 export type CanvasDocument = CanvasMetadata & { scene: Scene };
+// Current display metadata resolved from the identity provider for the overview.
+// Authorization and ownership always use creatorUserId, never ownerName.
+export type CanvasListItem = CanvasMetadata & { ownerName: string | null };

@@ -244,6 +244,13 @@ ones. Search filters canvas names in the active tab, ignoring case and surroundi
 spaces. The query stays in place when switching tabs. Tab counts show each group's
 total; the result count reflects the search. No thumbnail previews are loaded.
 
+Each canvas card shows its actual owner, including your own canvases. Owner names
+come from PropelAuth's username, falling back to the profile's full name. Missing
+profiles or unavailable directory lookups show **Owner: Unavailable**, not an email
+or internal user ID. Names are display-only; authorization still uses the creator's
+user ID and current organization membership. Only owners of already-accessible
+canvases are looked up, with duplicate users batched together.
+
 ## Rename and delete canvases
 
 The creator can open **Canvas actions** (the **…** button in the navigation bar) to rename

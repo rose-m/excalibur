@@ -1,4 +1,4 @@
-import type { CanvasDocument, CanvasMetadata } from "../shared/canvas.js";
+import type { CanvasDocument, CanvasListItem, CanvasMetadata } from "../shared/canvas.js";
 import type { CanvasComment, CommentState } from "../shared/comments.js";
 
 export class ApiError extends Error {
@@ -24,7 +24,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   me: () => request<{ userId: string; organizations: { id: string; name: string }[] }>("/api/auth/me"),
   ticket: (id: string) => request<{ ticket: string }>(`/api/canvases/${id}/live-ticket`, { method: "POST" }),
-  list: () => request<CanvasMetadata[]>("/api/canvases"),
+  list: () => request<CanvasListItem[]>("/api/canvases"),
   create: (title: string) => request<CanvasDocument>("/api/canvases", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }),
   }),

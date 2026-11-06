@@ -3,11 +3,27 @@ import type { CanvasService } from "../../canvas/service.js";
 import { readJson } from "../json.js";
 import type { HttpEnv } from "../types.js";
 import { liveCanvasRoute } from "../../live/route.js";
+import type { Authentication } from "../../auth/propelauth.js";
+import type { CanvasListItem } from "../../../shared/canvas.js";
+import { developmentContext } from "../../auth/context.js";
 
-export function createCanvasRoutes(service: CanvasService) {
+export function createCanvasRoutes(service: CanvasService, authentication?: Authentication) {
   const routes = new Hono<HttpEnv>();
 
-  routes.get("/", (c) => c.json(service.list(c.get("context"))));
+  routes.get("/", async c => {
+    // Derive lookup IDs exclusively from the already-authorized canvas list.
+    const canvases = service.list(c.get("context"));
+    const ownerIds = [...new Set(canvases.map(canvas => canvas.creatorUserId))];
+    let names: ReadonlyMap<string, string> = new Map();
+    if (ownerIds.length && authentication?.getUserDisplayNames) {
+      try { names = await authentication.getUserDisplayNames(ownerIds); }
+      catch { /* Names are optional display metadata, not an authorization check. */ }
+    } else if (!authentication) {
+      names = new Map([[developmentContext.userId, "Local development"]]);
+    }
+    const items: CanvasListItem[] = canvases.map(canvas => ({ ...canvas, ownerName: names.get(canvas.creatorUserId) ?? null }));
+    return c.json(items);
+  });
   routes.post("/", async (c) =>
     c.json(service.create(c.get("context"), await readJson(c.req)), 201));
 

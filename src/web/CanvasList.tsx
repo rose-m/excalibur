@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { CanvasMetadata } from "../shared/canvas.js";
+import type { CanvasListItem } from "../shared/canvas.js";
 import { api } from "./api.js";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -9,7 +9,7 @@ const tabs = [{ id: "mine", label: "My canvases" }, { id: "shared", label: "Org 
 
 export function CanvasList({ authenticated, userId }: { authenticated: boolean; userId: string | undefined }) {
   const navigate = useNavigate();
-  const [canvases, setCanvases] = useState<CanvasMetadata[]>([]);
+  const [canvases, setCanvases] = useState<CanvasListItem[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -88,6 +88,7 @@ export function CanvasList({ authenticated, userId }: { authenticated: boolean; 
           {visible.map(canvas => <li key={canvas.id}>
             <Link to={`/canvases/${canvas.id}`} className="canvas-card">
               <h2>{canvas.title}</h2>
+              <p className="canvas-owner">Owner: <span>{canvas.ownerName ?? "Unavailable"}</span></p>
               <p className="muted">{canvas.visibility === "organization" ? "Organization" : "Private"} · Updated {new Date(canvas.updatedAt).toLocaleString()}</p>
             </Link>
           </li>)}

@@ -4,16 +4,16 @@ import type { TestContext } from "node:test";
 import { act, createElement } from "react";
 import { JSDOM } from "jsdom";
 import { api } from "../src/web/api.js";
-import type { CanvasMetadata } from "../src/shared/canvas.js";
+import type { CanvasListItem } from "../src/shared/canvas.js";
 
 const metadata = { organizationId: "org-a", revision: 0, createdAt: "2026-11-06T10:00:00Z", updatedAt: "2026-11-06T10:00:00Z" };
-const canvases: CanvasMetadata[] = [
-  { ...metadata, id: "mine-private", title: "Personal notes", creatorUserId: "alice", visibility: "private" },
-  { ...metadata, id: "mine-shared", title: "Team ROADMAP", creatorUserId: "alice", visibility: "organization" },
-  { ...metadata, id: "other-shared", title: "Team architecture", creatorUserId: "bob", visibility: "organization" },
+const canvases: CanvasListItem[] = [
+  { ...metadata, id: "mine-private", title: "Personal notes", creatorUserId: "alice", ownerName: "alice-design", visibility: "private" },
+  { ...metadata, id: "mine-shared", title: "Team ROADMAP", creatorUserId: "alice", ownerName: "alice-design", visibility: "organization" },
+  { ...metadata, id: "other-shared", title: "Team architecture", creatorUserId: "bob", ownerName: "bob-engineering", visibility: "organization" },
 ];
 
-async function fixture(t: TestContext, items: CanvasMetadata[] | Promise<CanvasMetadata[]> = canvases, userId = "alice") {
+async function fixture(t: TestContext, items: CanvasListItem[] | Promise<CanvasListItem[]> = canvases, userId = "alice") {
   const dom = new JSDOM('<div id="root"></div>', { url: "https://draw.example/" });
   const globals = { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true };
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -64,8 +64,26 @@ test("canvas tabs separate ownership from organization sharing, including one's 
     assert.equal(f.tabs[1]!.getAttribute("aria-selected"), "true");
     assert.equal(f.document.querySelector('[role="tabpanel"]')?.getAttribute("aria-labelledby"), f.tabs[1]!.id);
     assert.equal(f.document.querySelector(".canvas-card")?.getAttribute("href"), "/canvases/mine-shared");
-    assert.match(f.document.querySelector(".canvas-card p")?.textContent ?? "", /Organization/);
+    assert.match(f.document.querySelector(".canvas-card .muted")?.textContent ?? "", /Organization/);
     assert.equal(f.list.mock.callCount(), 1, "switching tabs does not refetch the same authorized list");
+  } finally { f.close(); }
+});
+
+test("the overview displays actual owner names in both groups, not a UUID or a You substitute", async t => {
+  const f = await fixture(t);
+  try {
+    assert.deepEqual(Array.from(f.document.querySelectorAll(".canvas-owner")).map(item => item.textContent), ["Owner: alice-design", "Owner: alice-design"]);
+    await f.click(f.tabs[1]!);
+    assert.deepEqual(Array.from(f.document.querySelectorAll(".canvas-owner")).map(item => item.textContent), ["Owner: alice-design", "Owner: bob-engineering"]);
+    assert(!f.document.querySelector(".canvas-owner")?.textContent?.includes("You"));
+  } finally { f.close(); }
+});
+
+test("missing owner profiles do not prevent canvases from being displayed", async t => {
+  const f = await fixture(t, [{ ...canvases[0]!, ownerName: null }]);
+  try {
+    assert.deepEqual(f.titles(), ["Personal notes"]);
+    assert.equal(f.document.querySelector(".canvas-owner")?.textContent, "Owner: Unavailable");
   } finally { f.close(); }
 });
 
@@ -121,7 +139,7 @@ test("canvas tabs support arrow keys, Home and End with a single keyboard tab st
 
 test("loading and list failures do not claim that a group is empty", async t => {
   let reject!: (error: Error) => void;
-  const pending = new Promise<CanvasMetadata[]>((_resolve, fail) => { reject = fail; });
+  const pending = new Promise<CanvasListItem[]>((_resolve, fail) => { reject = fail; });
   const f = await fixture(t, pending);
   try {
     assert.equal(f.document.querySelector('[role="tabpanel"]')?.getAttribute("aria-busy"), "true");
