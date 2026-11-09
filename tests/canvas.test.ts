@@ -78,9 +78,11 @@ test("Postgres rolls scene, revision and assets back together after a mid-commit
     const invalid = scene();
     invalid.elements = [];
     invalid.files.asset!.dataURL = "no base64 separator";
-    // Exercise the adapter directly: this throws after UPDATE and asset DELETE,
+    // Exercise the adapter directly: this throws after the scene UPDATE,
     // proving its transaction rolls back even when the application is bypassed.
-    await assert.rejects(async () => await repository.commit(canvas.id, { expectedRevision: 1, scene: invalid }, new Date().toISOString()));
+    await assert.rejects(async () => await repository.commit(canvas.id, {
+      expectedRevision: 1, scene: invalid, assets: { upsert: invalid.files, remove: [] },
+    }, new Date().toISOString()));
     const restored = await service.get(owner, canvas.id);
     assert.equal(restored.revision, 1);
     assert.deepEqual(restored.scene, scene());

@@ -1,13 +1,14 @@
 import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { CanvasDocument, CanvasMetadata, SaveScene, Scene } from "../../shared/canvas.js";
+import type { CanvasDocument, CanvasMetadata, Scene } from "../../shared/canvas.js";
 import type { OperationContext } from "../auth/context.js";
-import type { CanvasRepository } from "./repository.js";
+import type { CanvasRepository, SceneCommit } from "./repository.js";
 import type { CanvasComment, CommentState } from "../../shared/comments.js";
 import { signature } from "../../shared/signature.js";
 
 type Row = Record<string, unknown>;
+const metadataColumns = "id, organization_id, creator_user_id, title, visibility, revision, created_at, updated_at";
 function metadata(row: Row): CanvasMetadata {
   return {
     id: row.id as string, organizationId: row.organization_id as string,
@@ -53,7 +54,7 @@ export class PostgresCanvasRepository implements CanvasRepository {
   }
 
   async list(context: OperationContext) {
-    return (await this.pool.query(`SELECT * FROM canvases WHERE organization_id = $1
+    return (await this.pool.query(`SELECT ${metadataColumns} FROM canvases WHERE organization_id = $1
       AND (creator_user_id = $2 OR visibility = 'organization') ORDER BY updated_at DESC, id`,
     [context.organizationId, context.userId])).rows.map(metadata);
   }
@@ -84,16 +85,34 @@ export class PostgresCanvasRepository implements CanvasRepository {
     }, true);
   }
 
-  async commit(id: string, input: SaveScene, updatedAt: string) {
+  async commit(id: string, input: SceneCommit, updatedAt: string) {
     return this.transaction(async client => {
       const row = (await client.query(`UPDATE canvases SET elements = $1, shared_settings = $2,
-        revision = revision + 1, updated_at = $3 WHERE id = $4 AND revision = $5 RETURNING *`,
+        revision = revision + 1, updated_at = $3 WHERE id = $4 AND revision = $5 RETURNING ${metadataColumns}`,
       [JSON.stringify(input.scene.elements), JSON.stringify(input.scene.sharedSettings), updatedAt, id, input.expectedRevision])).rows[0];
       if (!row) return undefined;
-      await client.query("DELETE FROM assets WHERE canvas_id = $1", [id]);
-      for (const file of Object.values(input.scene.files)) {
-        await client.query("INSERT INTO assets (canvas_id, asset_id, mime_type, content, created) VALUES ($1, $2, $3, $4, $5)",
-          [id, file.id, file.mimeType, Buffer.from(file.dataURL.split(",")[1]!, "base64"), file.created]);
+      const files = Object.values(input.assets.upsert);
+      const upsertIds = new Set(files.map(file => file.id));
+      if (input.assets.remove.some(assetId => upsertIds.has(assetId))) {
+        throw new Error("An asset cannot be upserted and removed in the same commit");
+      }
+      if (input.assets.remove.length) {
+        await client.query("DELETE FROM assets WHERE canvas_id = $1 AND asset_id = ANY($2::text[])", [id, input.assets.remove]);
+      }
+      if (files.length) {
+        // Ordinary scene edits execute no asset DML and transmit no blob bytes.
+        // Multiple new assets share one round trip; redundant explicit upserts
+        // do not update existing rows or rewrite their TOAST storage.
+        await client.query(`INSERT INTO assets (canvas_id, asset_id, mime_type, content, created)
+          SELECT $1, incoming.asset_id, incoming.mime_type, incoming.content, incoming.created
+          FROM unnest($2::text[], $3::text[], $4::bytea[], $5::double precision[])
+            AS incoming(asset_id, mime_type, content, created)
+          ON CONFLICT (canvas_id, asset_id) DO UPDATE
+            SET mime_type = EXCLUDED.mime_type, content = EXCLUDED.content, created = EXCLUDED.created
+          WHERE (assets.mime_type, assets.content, assets.created)
+            IS DISTINCT FROM (EXCLUDED.mime_type, EXCLUDED.content, EXCLUDED.created)`,
+        [id, files.map(file => file.id), files.map(file => file.mimeType),
+          files.map(file => Buffer.from(file.dataURL.split(",")[1]!, "base64")), files.map(file => file.created)]);
       }
       return metadata(row);
     });
@@ -101,13 +120,13 @@ export class PostgresCanvasRepository implements CanvasRepository {
 
   async setVisibility(id: string, visibility: CanvasMetadata["visibility"], expectedRevision: number, updatedAt: string) {
     const row = (await this.pool.query(`UPDATE canvases SET visibility = $1, revision = revision + 1, updated_at = $2
-      WHERE id = $3 AND revision = $4 RETURNING *`, [visibility, updatedAt, id, expectedRevision])).rows[0];
+      WHERE id = $3 AND revision = $4 RETURNING ${metadataColumns}`, [visibility, updatedAt, id, expectedRevision])).rows[0];
     return row ? metadata(row) : undefined;
   }
 
   async rename(id: string, title: string, expectedRevision: number, updatedAt: string) {
     const row = (await this.pool.query(`UPDATE canvases SET title = $1, revision = revision + 1, updated_at = $2
-      WHERE id = $3 AND revision = $4 RETURNING *`, [title, updatedAt, id, expectedRevision])).rows[0];
+      WHERE id = $3 AND revision = $4 RETURNING ${metadataColumns}`, [title, updatedAt, id, expectedRevision])).rows[0];
     return row ? metadata(row) : undefined;
   }
 

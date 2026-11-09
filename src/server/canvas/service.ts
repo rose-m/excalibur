@@ -211,12 +211,14 @@ export class CanvasService {
     if (mutation.expectedRevision !== undefined && mutation.expectedRevision !== current.revision) {
       throw new ServiceError(409, "Canvas revision changed. Read the latest scene and retry.");
     }
+    const addedFiles = Object.create(null) as Scene["files"];
     for (const [key, file] of Object.entries(mutation.files)) {
       const existing = Object.hasOwn(current.scene.files, key) ? current.scene.files[key] : undefined;
       if (existing && (existing.mimeType !== file.mimeType || existing.dataURL !== file.dataURL)) {
         throw new ServiceError(409, "An image asset ID cannot be reused for different content");
       }
       if (existing) mutation.files[key] = existing;
+      else addedFiles[key] = file;
     }
     const scene = sceneSchema.parse({
       elements: reconcileElements(current.scene.elements, mutation.elements),
@@ -237,7 +239,12 @@ export class CanvasService {
     // Cancellation can arrive while queued or while loading the current scene.
     // Once persistence starts, its transaction must finish atomically.
     signal?.throwIfAborted();
-    const committed = await this.repository.commit(id, { expectedRevision: current.revision, scene }, new Date().toISOString());
+    const committed = await this.repository.commit(id, {
+      expectedRevision: current.revision, scene,
+      // Existing assets are immutable. Keep bytes for tombstones/native undo;
+      // only genuinely new files belong in the persistence delta.
+      assets: { upsert: addedFiles, remove: [] },
+    }, new Date().toISOString());
     if (!committed) throw new ServiceError(409, "Canvas revision changed. Read the latest scene and retry.");
     update.revision = committed.revision;
     // Only committed state is observable. A subscriber failure cannot undo or

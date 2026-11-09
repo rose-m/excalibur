@@ -36,11 +36,15 @@ test("Postgres revision checks admit only one concurrent commit across pools", a
     const canvas = await new CanvasService(repository).create(context, { title: "CAS" });
     const results = await Promise.all([repository, other].map((connection, i) => connection.commit(canvas.id, {
       expectedRevision: 0, scene: { ...canvas.scene, elements: [element(`winner-${i}`)] },
+      assets: { upsert: { [`asset-${i}`]: {
+        id: `asset-${i}`, mimeType: "image/png", dataURL: "data:image/png;base64,AA==", created: 1,
+      } }, remove: [] },
     }, new Date().toISOString())));
     assert.equal(results.filter(Boolean).length, 1);
     const stored = await other.get(canvas.id);
     assert.equal(stored?.revision, 1);
     assert.equal(stored?.scene.elements[0]?.id, `winner-${results.findIndex(Boolean)}`);
+    assert.deepEqual(Object.keys(stored!.scene.files), [`asset-${results.findIndex(Boolean)}`]);
   } finally { await Promise.all([repository.close(), other.close()]); }
 });
 

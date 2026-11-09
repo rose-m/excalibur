@@ -18,16 +18,22 @@ test("incremental mutations retain unrelated elements, tombstones and binding fi
     const shape = { ...element("shape", "a0"), boundElements: [{ id: "arrow", type: "arrow" }] };
     const arrow = { ...element("arrow", "a1"), type: "arrow", startBinding: { elementId: "shape", focus: 0, gap: 1 }, endBinding: null, points: [[0, 0], [100, 100]] };
     const events: number[] = [];
-    const unsubscribe = await service.subscribe(owner, canvas.id, async (update) => {
-      assert.equal((await service.get(owner, canvas.id)).revision, update.revision, "publish must happen after commit");
-      events.push(update.revision);
+    const publications: Promise<void>[] = [];
+    const unsubscribe = await service.subscribe(owner, canvas.id, update => {
+      publications.push(service.get(owner, canvas.id).then(stored => {
+        assert.equal(stored.revision, update.revision, "publish must happen after commit");
+        events.push(update.revision);
+      }));
     });
     await service.mutate(owner, canvas.id, { elements: [shape, arrow] });
+    await Promise.all(publications);
     await service.mutate(owner, canvas.id, { elements: [{ ...shape, version: 2, versionNonce: 20, width: 200 }] });
+    await Promise.all(publications);
     let stored = await service.get(owner, canvas.id);
     assert.equal(stored.scene.elements.length, 2);
     assert.deepEqual(stored.scene.elements.find((item) => item.id === "arrow")?.startBinding, arrow.startBinding);
     await service.mutate(owner, canvas.id, { elements: [{ ...arrow, version: 2, versionNonce: 30, isDeleted: true }] });
+    await Promise.all(publications);
     stored = await service.get(owner, canvas.id);
     assert.equal(stored.scene.elements.find((item) => item.id === "arrow")?.isDeleted, true);
     assert.equal(stored.scene.elements.find((item) => item.id === "shape")?.width, 200);

@@ -349,6 +349,9 @@ Agents can also retrieve, add, and resolve notes through MCP.
   canvas read. PNG, JPEG, GIF and WebP are supported; SVG imports are not yet
   supported. Limits: 5 MiB per image, 15 MiB total images, 24 MiB request/message
   and scene size, and 20,000 elements.
+- Commits write only added or changed image assets, in one batch. Ordinary shape
+  and background edits do not issue asset writes; existing bytes are retained for
+  native undo. Metadata-only queries do not fetch scene snapshots.
 - Incremental element/file updates are throttled to 100 ms intervals during active
   drawing, with one mutation awaiting acknowledgment at a time. Final changes are
   sent without requiring another editor callback. Exact scene diffs run at send
