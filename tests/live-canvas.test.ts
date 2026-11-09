@@ -6,6 +6,7 @@ import { LiveCanvas } from "../src/web/live-canvas.js";
 import type { LiveRecovery, LiveSocket, LiveStatus } from "../src/web/live-canvas.js";
 import type { LiveEditor } from "../src/web/live-state.js";
 import type { CommentState } from "../src/shared/comments.js";
+import { reconcileElements } from "../src/server/canvas/reconcile.js";
 
 const white = { viewBackgroundColor: "#fff" };
 const black = { viewBackgroundColor: "#000" };
@@ -26,6 +27,7 @@ class DeferredEditor implements LiveEditor {
   pendingSettings: Scene["sharedSettings"][] = [];
   changed = () => {};
   selection: string[] = [];
+  activeElements = new Set<string>();
   selectedElementIds() { return this.selection; }
   read() { return this.scene; }
   normalize(scene: Scene) { return structuredClone(scene); }
@@ -33,7 +35,13 @@ class DeferredEditor implements LiveEditor {
   render(scene: Scene, replace: boolean) {
     const copy = structuredClone(scene);
     const elements = new Map((replace ? [] : this.scene.elements).map((item) => [item.id, item]));
-    for (const item of copy.elements) elements.set(item.id, item);
+    for (const item of copy.elements) {
+      const local = elements.get(item.id);
+      // Match native reconciliation's active-editor and version exemptions.
+      if (local && !replace && (this.activeElements.has(item.id) || local.version > item.version
+        || (local.version === item.version && local.versionNonce < item.versionNonce))) continue;
+      elements.set(item.id, item);
+    }
     this.scene.elements = [...elements.values()];
     this.scene.files = { ...this.scene.files, ...copy.files };
     // Excalidraw replaces scene elements synchronously, but React applies
@@ -110,6 +118,22 @@ function fixture() {
 
 function update(revision: number, sharedSettings = black): SceneUpdate {
   return { revision, elements: [], files: {}, sharedSettings };
+}
+
+function authoritativeScene() {
+  let scene = blank();
+  let revision = 0;
+  return {
+    read: () => scene,
+    commit(mutation: Mutation): SceneUpdate {
+      scene = {
+        elements: reconcileElements(scene.elements, mutation.elements),
+        files: { ...scene.files, ...mutation.files },
+        sharedSettings: mutation.sharedSettings ?? scene.sharedSettings,
+      };
+      return { ...scene, revision: ++revision };
+    },
+  };
 }
 
 test("sharing metadata and empty revision updates do not dirty or interrupt the live editor", () => {
@@ -389,3 +413,367 @@ test("a newer local color equal to the old baseline is retained while an older w
     assert.deepEqual(f.socket.sent[1]!.mutation.sharedSettings, white);
   } finally { f.close(); }
 });
+
+test("continuous drawing sends at bounded intervals and flushes the final edit without another callback", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  const f = fixture();
+  try {
+    const sentAt: number[] = [];
+    const send = f.socket.send.bind(f.socket);
+    t.mock.method(f.socket, "send", (data: Parameters<LiveSocket["send"]>[0]) => {
+      if (JSON.parse(data as string).type === "mutate") sentAt.push(Date.now());
+      send(data);
+    });
+    let acknowledged = 0;
+    for (let version = 1; version <= 15; version++) {
+      f.editor.scene.elements = [{ ...element, version }];
+      f.client.changed();
+      t.mock.timers.tick(20);
+      if (f.socket.sent.length > acknowledged) {
+        const packet = f.socket.sent.at(-1)!;
+        const committed = { ...update(++acknowledged, white), elements: packet.mutation.elements };
+        f.socket.message({ type: "update", update: committed });
+        f.socket.message({ type: "ack", requestId: packet.requestId, update: committed });
+        f.editor.applyAll();
+      }
+    }
+    assert.deepEqual(sentAt, [1100, 1200, 1300], "continuous callbacks must not reset the send deadline");
+    assert.equal(f.socket.sent.at(-1)!.mutation.elements[0]!.version, 15);
+    t.mock.timers.tick(10);
+    f.editor.scene.elements = [{ ...element, version: 16 }];
+    f.client.changed();
+    t.mock.timers.tick(89);
+    assert.equal(f.socket.sent.length, 3);
+    t.mock.timers.tick(1);
+    assert.equal(f.socket.sent.length, 4);
+    assert.equal(f.socket.sent[3]!.mutation.elements[0]!.version, 16);
+  } finally { f.close(); }
+});
+
+test("slow acknowledgments retain one in-flight mutation and resume without another debounce delay", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  const f = fixture();
+  try {
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    const packet = f.socket.sent[0]!;
+    assert(packet);
+    for (let version = 2; version <= 5; version++) {
+      f.editor.scene.elements = [{ ...element, version }];
+      f.client.changed();
+      t.mock.timers.tick(100);
+    }
+    assert.equal(f.socket.sent.length, 1);
+    const latest = f.editor.scene.elements;
+    const committed = { ...update(1, white), elements: packet.mutation.elements };
+    f.socket.message({ type: "update", update: committed });
+    // Native reconciliation preserves a newer active local element.
+    f.editor.scene.elements = latest;
+    f.socket.message({ type: "ack", requestId: packet.requestId, update: committed });
+    t.mock.timers.tick(0);
+    assert.equal(f.socket.sent.length, 2);
+    assert.equal(f.socket.sent[1]!.mutation.elements[0]!.version, 5);
+  } finally { f.close(); }
+});
+
+test("clean reconnect clears an old pending send deadline before accepting new edits", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  try {
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    // The disconnect checks the actual scene, even before a revert's callback.
+    f.editor.scene.elements = [];
+    f.socket.disconnect();
+    t.mock.timers.tick(400);
+    const replacement = f.sockets[1]!;
+    assert(replacement);
+    replacement.message({ type: "snapshot", canvas: f.canvas });
+    f.editor.applyAll();
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    assert.equal(replacement.sent.length, 1);
+  } finally { f.close(); }
+});
+
+test("onChange does not serialize element geometry during viewport callbacks or continuous edits", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  try {
+    const points = Array.from({ length: 1000 }, (_, i) => [i, i]);
+    f.socket.message({ type: "update", update: { ...update(1, white), elements: [{ ...element, points }] } });
+    f.editor.applyAll();
+    let geometryReads = 0;
+    Object.defineProperty(f.editor.scene.elements[0]!, "points", {
+      enumerable: true, get: () => { geometryReads++; return points; },
+    });
+    for (let i = 0; i < 100; i++) f.client.changed();
+    t.mock.timers.tick(100);
+    assert.equal(geometryReads, 0, "viewport/selection callbacks must not fingerprint the scene");
+    assert.equal(f.socket.sent.length, 0);
+    f.editor.scene.elements[0]!.version++;
+    for (let i = 0; i < 100; i++) f.client.changed();
+    assert.equal(geometryReads, 0, "native version checks must not inspect geometry");
+    t.mock.timers.tick(100);
+    assert.equal(f.socket.sent.length, 1);
+    assert(geometryReads > 0, "the exact diff and wire payload still contain the full native element");
+  } finally { f.close(); }
+});
+
+for (const order of ["broadcast-first", "ack-first"] as const) {
+  test(`own committed update is normalized and rendered once (${order})`, t => {
+    const f = fixture();
+    try {
+      f.editor.scene.elements = [{ ...element }];
+      f.client.changed();
+      f.client.flush();
+      const normalize = t.mock.method(f.editor, "normalize");
+      const render = t.mock.method(f.editor, "render");
+      const packet = f.socket.sent[0]!;
+      const committed = { ...update(1, white), elements: packet.mutation.elements };
+      const broadcast: ServerMessage = { type: "update", update: committed };
+      const ack: ServerMessage = { type: "ack", requestId: packet.requestId, update: committed };
+      for (const message of order === "broadcast-first" ? [broadcast, ack] : [ack, broadcast]) f.socket.message(message);
+      assert.equal(normalize.mock.callCount(), 1);
+      assert.equal(render.mock.callCount(), 1);
+      f.editor.applyAll();
+      assert.equal(f.client.hasUnsavedChanges(), false);
+      assert.equal(f.statuses.at(-1)?.message, "Live · Saved");
+    } finally { f.close(); }
+  });
+}
+
+for (const concurrent of [false, true]) {
+  test(`no-op acknowledgment still applies authoritative corrections (concurrent=${concurrent})`, t => {
+    const f = fixture();
+    try {
+      const winner = { ...element, version: 2, versionNonce: 1 };
+      const losing = { ...element, version: 2, versionNonce: 90 };
+      if (!concurrent) {
+        f.socket.message({ type: "update", update: { ...update(1, white), elements: [winner] } });
+        f.editor.applyAll();
+      }
+      f.editor.scene.elements = [losing];
+      f.client.changed();
+      f.client.flush();
+      const packet = f.socket.sent[0]!;
+      const correction = { ...update(1, white), elements: [winner] };
+      if (concurrent) {
+        f.socket.message({ type: "update", update: correction });
+        f.editor.scene.elements = [losing];
+      }
+      const render = t.mock.method(f.editor, "render");
+      f.socket.message({ type: "ack", requestId: packet.requestId, update: correction });
+      assert.equal(render.mock.callCount(), 1, "a rejected mutation must not be mistaken for an already-applied commit");
+      assert.deepEqual(f.editor.scene.elements, [winner]);
+      f.editor.applyAll();
+      assert.equal(f.client.hasUnsavedChanges(), false);
+    } finally { f.close(); }
+  });
+}
+
+for (const phase of ["before-broadcast", "before-ack", "after-ack"] as const) {
+  for (const type of ["rectangle", "line"]) {
+    test(`native cancellation deletes a throttled ${type} (${phase})`, t => {
+      t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+      const f = fixture();
+      const server = authoritativeScene();
+      try {
+        f.editor.scene.elements = [{ ...element, type, width: 80, height: 60, version: 2 }];
+        f.editor.activeElements.add(element.id);
+        f.client.changed();
+        t.mock.timers.tick(100);
+        const first = f.socket.sent[0]!;
+        assert(first, "the intermediate shape must already have left the browser");
+        const committed = server.commit(first.mutation);
+        if (phase !== "before-broadcast") {
+          f.socket.message({ type: "update", update: committed });
+          f.editor.applyAll();
+        }
+        if (phase === "after-ack") {
+          f.socket.message({ type: "ack", requestId: first.requestId, update: committed });
+          f.editor.applyAll();
+        }
+        // Native finalization mutates the active draft, then removes it outright.
+        const draft = f.editor.scene.elements[0]!;
+        draft.version += 3;
+        draft.width = draft.height = 0;
+        const canceledVersion = draft.version;
+        f.editor.scene.elements = [];
+        f.client.changed();
+        assert.equal(f.client.hasUnsavedChanges(), true);
+        if (phase === "before-broadcast") f.socket.message({ type: "update", update: committed });
+        if (phase !== "after-ack") f.socket.message({ type: "ack", requestId: first.requestId, update: committed });
+        f.editor.applyAll();
+        assert(!f.editor.scene.elements.some(item => !item.isDeleted), "commit echoes must not resurrect the canceled draft");
+        assert.equal(f.client.hasUnsavedChanges(), true, "creation confirmation is not cancellation confirmation");
+        t.mock.timers.tick(100);
+        const deletion = f.socket.sent[1]!;
+        assert(deletion);
+        const tombstone = deletion.mutation.elements.find(item => item.id === element.id)!;
+        assert(tombstone.isDeleted);
+        assert(tombstone.version > canceledVersion);
+        const deleted = server.commit(deletion.mutation);
+        f.socket.message({ type: "update", update: deleted });
+        f.socket.message({ type: "ack", requestId: deletion.requestId, update: deleted });
+        f.editor.activeElements.clear();
+        f.editor.applyAll();
+        assert(!server.read().elements.some(item => !item.isDeleted), "authoritative state must stay empty on reopen");
+        assert.equal(f.client.hasUnsavedChanges(), false);
+        assert.equal(f.statuses.at(-1)?.message, "Live · Saved");
+      } finally { f.close(); }
+    });
+  }
+}
+
+test("drafts canceled before their first send and missing remote elements do not produce deletions", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  try {
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    f.editor.scene.elements = [];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    assert.equal(f.socket.sent.length, 0);
+    f.socket.message({ type: "update", update: { ...update(1, white), elements: [{ ...element, id: "remote" }] } });
+    f.editor.applyAll();
+    f.editor.scene.elements = [];
+    f.client.changed();
+    f.client.flush();
+    assert.equal(f.socket.sent.length, 0, "only submitted local creations can infer native cancellation");
+  } finally { f.close(); }
+});
+
+test("cancellation wins over an intervening committed edit and is retained in disconnect recovery", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  const server = authoritativeScene();
+  try {
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    const first = f.socket.sent[0]!;
+    const committed = server.commit(first.mutation);
+    f.editor.scene.elements = [];
+    // No local callback yet: receive must capture disappearance before rendering.
+    f.socket.message({ type: "update", update: committed });
+    const edited = server.commit({ elements: [{ ...element, version: 10 }], files: {} });
+    f.socket.message({ type: "update", update: edited });
+    f.socket.message({ type: "ack", requestId: first.requestId, update: committed });
+    t.mock.timers.tick(100);
+    const deletion = f.socket.sent[1]!;
+    assert(deletion.mutation.elements[0]!.isDeleted);
+    assert(deletion.mutation.elements[0]!.version > 10);
+    server.commit(deletion.mutation);
+    assert(server.read().elements[0]!.isDeleted);
+    f.socket.disconnect();
+    const recovery = f.client.dispose();
+    assert(recovery.unsaved, "unacknowledged deletion must not be treated as a clean disconnect");
+    assert(recovery.scene.elements[0]!.isDeleted, "export/recovery must preserve cancellation intent");
+  } finally { f.close(); }
+});
+
+test("a newer native undo can restore an element after cancellation without a tombstone loop", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  const server = authoritativeScene();
+  const acknowledge = (index: number) => {
+    const packet = f.socket.sent[index]!;
+    const committed = server.commit(packet.mutation);
+    f.socket.message({ type: "update", update: committed });
+    f.socket.message({ type: "ack", requestId: packet.requestId, update: committed });
+    f.editor.applyAll();
+  };
+  try {
+    f.editor.scene.elements = [{ ...element }];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    acknowledge(0);
+    f.editor.scene.elements = [];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    const tombstone = f.socket.sent[1]!.mutation.elements[0]!;
+    f.editor.scene.elements = [{ ...tombstone, isDeleted: false, version: tombstone.version + 1 }];
+    f.client.changed();
+    acknowledge(1);
+    t.mock.timers.tick(100);
+    assert.equal(f.socket.sent.length, 3);
+    assert.equal(f.socket.sent[2]!.mutation.elements[0]!.isDeleted, false);
+    acknowledge(2);
+    assert.equal(server.read().elements[0]!.isDeleted, false);
+    assert.equal(f.client.hasUnsavedChanges(), false);
+    t.mock.timers.tick(1000);
+    assert.equal(f.socket.sent.length, 3);
+  } finally { f.close(); }
+});
+
+test("a concurrent same-version deletion cannot hide cancellation of an in-flight live draft", t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture();
+  const server = authoritativeScene();
+  try {
+    f.editor.activeElements.add(element.id);
+    f.editor.scene.elements = [{ ...element, width: 80, height: 60 }];
+    f.client.changed();
+    t.mock.timers.tick(100);
+    const first = f.socket.sent[0]!;
+    const created = server.commit(first.mutation);
+    f.socket.message({ type: "update", update: created });
+    f.socket.message({ type: "ack", requestId: first.requestId, update: created });
+    f.editor.scene.elements[0]!.version = 3;
+    f.client.changed();
+    t.mock.timers.tick(100);
+    const moving = f.socket.sent[1]!;
+    const remoteDeletion = server.commit({ elements: [{ ...element, isDeleted: true, version: 3, versionNonce: 900 }], files: {} });
+    f.socket.message({ type: "update", update: remoteDeletion });
+    // Active-editor reconciliation keeps the draft; finalization then drops it
+    // without another version increment. The already-sent nonce wins the race.
+    f.editor.scene.elements = [];
+    f.client.changed();
+    const restored = server.commit(moving.mutation);
+    assert.equal(server.read().elements[0]!.isDeleted, false);
+    f.socket.message({ type: "update", update: restored });
+    f.socket.message({ type: "ack", requestId: moving.requestId, update: restored });
+    t.mock.timers.tick(100);
+    const deletion = f.socket.sent[2]!;
+    assert(deletion.mutation.elements[0]!.isDeleted);
+    assert(deletion.mutation.elements[0]!.version > 3);
+    server.commit(deletion.mutation);
+    assert(server.read().elements[0]!.isDeleted);
+    assert(!f.editor.scene.elements.some(item => !item.isDeleted));
+  } finally { f.close(); }
+});
+
+for (const callback of [false, true]) {
+  test(`cancellation during a clean reconnect is retained instead of overwritten (callback=${callback})`, t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const f = fixture();
+    try {
+      f.editor.scene.elements = [{ ...element }];
+      f.client.changed();
+      t.mock.timers.tick(100);
+      const first = f.socket.sent[0]!;
+      const committed = { ...update(1, white), elements: first.mutation.elements };
+      f.socket.message({ type: "update", update: committed });
+      f.socket.message({ type: "ack", requestId: first.requestId, update: committed });
+      f.editor.applyAll();
+      f.socket.disconnect();
+      f.editor.scene.elements = [];
+      if (callback) f.client.changed();
+      t.mock.timers.tick(400);
+      if (!callback) {
+        const replacement = f.sockets[1]!;
+        assert(replacement);
+        replacement.message({ type: "snapshot", canvas: { ...f.canvas, revision: 1, scene: { ...blank(), elements: [element] } } });
+      }
+      assert.match(f.statuses.at(-1)?.error ?? "", /unconfirmed cancellation/);
+      const recovery = f.client.dispose();
+      assert(recovery.unsaved);
+      assert(recovery.scene.elements[0]!.isDeleted);
+      assert.equal(f.socket.sent.length, 1, "offline cancellation must not be replayed automatically");
+    } finally { f.close(); }
+  });
+}

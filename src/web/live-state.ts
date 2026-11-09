@@ -45,15 +45,50 @@ export class SharedSettingsTracker {
 }
 
 export function pendingMutation(known: Scene, local: Scene): Mutation | null {
-  const previous = new Map(known.elements.map((element) => [element.id, signature(element)]));
-  const elements = local.elements.filter((element) => previous.get(element.id) !== signature(element));
-  const files = Object.fromEntries(Object.entries(local.files).filter(([id, file]) => {
-    const existing = Object.hasOwn(known.files, id) ? known.files[id] : undefined;
-    return !existing || existing.mimeType !== file.mimeType || existing.dataURL !== file.dataURL;
-  }));
-  const settingsChanged = signature(known.sharedSettings) !== signature(local.sharedSettings);
-  if (!elements.length && !Object.keys(files).length && !settingsChanged) return null;
-  return { elements, files, ...(settingsChanged ? { sharedSettings: local.sharedSettings } : {}) };
+  return new SceneDiffer(known).mutation(local);
+}
+
+// The editor advances native versions/nonces for content changes. Use those
+// small fields on onChange (including viewport/selection callbacks), and defer
+// exact document comparisons until a send or an explicit unsaved-work check.
+export class SceneDiffer {
+  private elements: Map<string, Scene["elements"][number]>;
+  private signatures = new Map<string, string>();
+
+  constructor(private known: Scene) {
+    this.elements = new Map(known.elements.map(element => [element.id, element]));
+  }
+
+  hasChanges(local: Scene): boolean {
+    return local.elements.some(element => {
+      const previous = this.elements.get(element.id);
+      return !previous || previous.version !== element.version || previous.versionNonce !== element.versionNonce
+        || previous.index !== element.index || previous.isDeleted !== element.isDeleted;
+    }) || Object.entries(local.files).some(([id, file]) => fileChanged(this.known, id, file))
+      || this.known.sharedSettings.viewBackgroundColor !== local.sharedSettings.viewBackgroundColor;
+  }
+
+  mutation(local: Scene): Mutation | null {
+    const elements = local.elements.filter(element => {
+      const previous = this.elements.get(element.id);
+      if (!previous) return true;
+      let before = this.signatures.get(element.id);
+      if (before === undefined) {
+        before = signature(previous);
+        this.signatures.set(element.id, before);
+      }
+      return before !== signature(element);
+    });
+    const files = Object.fromEntries(Object.entries(local.files).filter(([id, file]) => fileChanged(this.known, id, file)));
+    const settingsChanged = this.known.sharedSettings.viewBackgroundColor !== local.sharedSettings.viewBackgroundColor;
+    if (!elements.length && !Object.keys(files).length && !settingsChanged) return null;
+    return { elements, files, ...(settingsChanged ? { sharedSettings: local.sharedSettings } : {}) };
+  }
+}
+
+function fileChanged(known: Scene, id: string, file: Scene["files"][string]) {
+  const existing = Object.hasOwn(known.files, id) ? known.files[id] : undefined;
+  return !existing || existing.mimeType !== file.mimeType || existing.dataURL !== file.dataURL;
 }
 
 export function applyUpdate(scene: Scene, update: SceneUpdate): Scene {

@@ -349,9 +349,16 @@ Agents can also retrieve, add, and resolve notes through MCP.
   canvas read. PNG, JPEG, GIF and WebP are supported; SVG imports are not yet
   supported. Limits: 5 MiB per image, 15 MiB total images, 24 MiB request/message
   and scene size, and 20,000 elements.
-- Incremental element/file updates are debounced and serialized. The scene, assets and increasing revision
+- Incremental element/file updates are throttled to 100 ms intervals during active
+  drawing, with one mutation awaiting acknowledgment at a time. Final changes are
+  sent without requiring another editor callback. Exact scene diffs run at send
+  time rather than on every editor change, and already-applied commit echoes do
+  not trigger a second render. The scene, assets and increasing revision
   commit atomically before success is returned. Errors remain visible and unsaved
   edits trigger a navigation warning.
+- Canceling an in-progress shape that was already shared sends a versioned
+  deletion, even if the native editor removes it without a tombstone. Missing
+  remote elements are never inferred to be deletions.
 - The server reconciles element versions and nonces using the pinned Excalidraw
   semantics, preserves tombstones, and repairs fractional ordering. This resolves
   whole-element conflicts, not every property or concurrent text edit.
