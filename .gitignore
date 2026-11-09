@@ -4,6 +4,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.compose.example
 data/
 public/excalidraw-assets/
 *.log

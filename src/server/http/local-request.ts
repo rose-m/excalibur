@@ -5,10 +5,15 @@ import { isLocalAddress, localAddresses } from "../local-network.js";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function localRequestPolicy(port: number, allowLocal = false, addresses = localAddresses()) {
+export function localRequestPolicy(port: number, allowLocal = false, addresses = localAddresses(), publicUrl?: string) {
   const hosts = new Set(localHosts);
   if (allowLocal) for (const address of addresses) if (isLocalAddress(address)) hosts.add(address);
   const origins = new Set([...hosts].flatMap(host => [`http://${host}:${port}`, `http://${host}:5173`]));
+  // A mapped container port can differ from the backend's listening port.
+  if (publicUrl) {
+    const url = new URL(publicUrl);
+    if (hosts.has(url.hostname) && ["http:", "https:"].includes(url.protocol)) origins.add(url.origin);
+  }
   return { hosts, origins };
 }
 

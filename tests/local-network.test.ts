@@ -24,18 +24,27 @@ test("LAN discovery includes private interface addresses, not public or loopback
   assert.deepEqual(localAddresses({ lo: [entry("127.0.0.1", true)], en0: [entry("192.168.1.10")], duplicate: [entry("192.168.1.10")], public: [entry("8.8.8.8")] }), ["192.168.1.10"]);
 });
 
+test("mapped public ports allow browser origins only for permitted local hosts", () => {
+  const mapped = localRequestPolicy(3000, false, [], "http://127.0.0.1:53080");
+  assert(mapped.origins.has("http://127.0.0.1:53080"));
+  assert(!mapped.origins.has("http://127.0.0.1:53081"));
+  assert(!localRequestPolicy(3000, false, [], "https://unrelated.example").origins.has("https://unrelated.example"));
+  assert(!localRequestPolicy(3000, false, ["192.168.1.10"], "http://192.168.1.10:53080").origins.has("http://192.168.1.10:53080"));
+  assert(localRequestPolicy(3000, true, ["192.168.1.10"], "http://192.168.1.10:53080").origins.has("http://192.168.1.10:53080"));
+});
+
 test("dev --allow-local is explicit, configures both servers, and accepts pnpm's separator", () => {
   const addresses = ["192.168.1.10"];
   const normal = devEnvironment([], {}, addresses);
   assert.equal(normal.EXCALIBUR_ALLOW_LOCAL, "0");
-  assert.equal(normal.PUBLIC_URL, "http://127.0.0.1:5173");
+  assert.equal(normal.PUBLIC_URL, "http://localhost:5173");
   for (const args of [["--allow-local"], ["--", "--allow-local"]]) {
     const env = devEnvironment(args, {}, addresses);
     assert.equal(env.EXCALIBUR_ALLOW_LOCAL, "1");
     assert.equal(env.PUBLIC_URL, "http://192.168.1.10:5173");
   }
   assert.equal(devEnvironment(["--allow-local"], { PUBLIC_URL: "http://localhost:5173" }, addresses).PUBLIC_URL, "http://localhost:5173");
-  assert.equal(devEnvironment(["--allow-local"], {}, []).PUBLIC_URL, "http://127.0.0.1:5173");
+  assert.equal(devEnvironment(["--allow-local"], {}, []).PUBLIC_URL, "http://localhost:5173");
   assert.throws(() => devEnvironment(["--allow-lcoal"], {}, addresses));
 });
 

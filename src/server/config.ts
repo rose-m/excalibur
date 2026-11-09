@@ -35,7 +35,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be an integer between 1 and 65535");
 }
 
-const publicUrl = new URL(process.env.PUBLIC_URL ?? `http://${allowLocal ? localAddresses()[0] ?? "127.0.0.1" : "127.0.0.1"}:${port}`);
+const publicUrl = new URL(process.env.PUBLIC_URL ?? `http://${allowLocal ? localAddresses()[0] ?? "localhost" : "localhost"}:${port}`);
 if (!["http:", "https:"].includes(publicUrl.protocol) || publicUrl.pathname !== "/" || publicUrl.search || publicUrl.hash || publicUrl.username || publicUrl.password) {
   throw new Error("PUBLIC_URL must be an http(s) application origin without a path, query or credentials");
 }

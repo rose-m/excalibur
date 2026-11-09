@@ -18,7 +18,7 @@ import { createMcpSecurity, isMcpEndpoint, isMcpMetadataEndpoint } from "../mcp/
 export function createApp(service: CanvasService, webDirectory: string, port: number, publicUrl = `http://127.0.0.1:${port}`, network: { allowLocal?: boolean; localAddresses?: string[] } = {}, authentication?: Authentication, mcpAuthentication?: McpAuthentication) {
   if (mcpAuthentication && !authentication) throw new Error("MCP OAuth requires authenticated mode");
   const app = new Hono<HttpEnv>();
-  const policy = localRequestPolicy(port, network.allowLocal, network.localAddresses);
+  const policy = localRequestPolicy(port, network.allowLocal, network.localAddresses, publicUrl);
   const mcp = createMcpRoutes(service, publicUrl, network.allowLocal ? policy.origins : undefined);
   const tickets = new ConnectionTickets();
   const mcpSecurity = mcpAuthentication ? createMcpSecurity(mcpAuthentication, publicUrl) : undefined;

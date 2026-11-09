@@ -15,15 +15,16 @@ and Postgres 16+ (or Docker Compose for the bundled Postgres 17 service).
 ```sh
 pnpm install
 cp .env.example .env # For a fresh checkout; keep existing credentials otherwise.
-docker compose up -d postgres
+cp .env.compose.example .env.compose # For a fresh checkout.
+pnpm compose up -d postgres
 pnpm dev
 ```
 
-Open **http://127.0.0.1:5173**. Vite proxies HTTP and WebSocket calls to port 3000.
+Open **http://localhost:5173**. Vite proxies HTTP and WebSocket calls to port 3000.
 Create a canvas and open its `/canvases/:id` URL in two tabs to edit together.
 Wait for “Live · Saved” before closing.
 Scenes, comments and image bytes survive server restarts in Postgres.
-Local Compose publishes Postgres at `127.0.0.1:55432` to avoid conflicting with
+Local Compose publishes Postgres at `localhost:55432` to avoid conflicting with
 other local databases. Set `PGPORT` in `.env` to choose another host port;
 connections between containers still use port 5432.
 
@@ -57,7 +58,7 @@ Tests use a separate database and isolate each test repository in a temporary sc
 The test user needs permission to create schemas. Create the database once:
 
 ```sh
-docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" excalibur_test'
+pnpm compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" excalibur_test'
 ```
 
 Tests use the same `PGHOST`, `PGPORT`, `PGUSER`, and `PGPASSWORD` settings (with
@@ -71,7 +72,7 @@ pnpm build
 AUTH_MODE=development node --env-file=.env dist/server/index.js
 ```
 
-After building, **http://127.0.0.1:3000** serves both the UI and API. Editor fonts
+After building, **http://localhost:3000** serves both the UI and API. Editor fonts
 are copied from the pinned Excalidraw package and served locally. The editor is
 lazy-loaded; its upstream bundle is large and currently triggers Vite's chunk-size
 warning.
@@ -97,7 +98,7 @@ PropelAuth credentials in development mode is rejected to prevent accidental byp
    export AUTH_MODE=propelauth
    export PROPELAUTH_AUTH_URL=https://your-project.propelauthtest.com
    export PROPELAUTH_API_KEY=your-server-side-api-key
-   export PUBLIC_URL=http://127.0.0.1:5173 # production: https://draw.example.com
+   export PUBLIC_URL=http://localhost:5173 # production: https://draw.example.com
    pnpm dev
    ```
 
@@ -251,7 +252,7 @@ simulated issuer and authenticated MCP-to-browser editing; real hosted consent
 requires your dashboard setup and is a separate acceptance check.
 
 `AUTH_MODE=development` retains the unauthenticated local-only MCP endpoint at
-`http://127.0.0.1:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
+`http://localhost:3000/mcp` (also proxied on 5173). Do not expose that mode publicly.
 
 ## Browse canvases
 
@@ -398,14 +399,24 @@ package, not a pnpm workspace.
 
 ## Container
 
+Use `.env.compose` for Compose settings, independently of `.env` used by `pnpm dev`:
+
 ```sh
-docker compose up --build
+cp .env.compose.example .env.compose # First setup only; keep existing credentials.
+pnpm compose up --build
 ```
 
-Open http://127.0.0.1:3000. Compose publishes the container only on host loopback.
+`pnpm compose` runs `docker compose --env-file .env.compose`; use the shortcut
+for all Compose commands. Plain `docker compose` still auto-loads `.env`.
+Both local files are git-ignored and excluded from Docker builds.
+
+Open http://localhost:53080. Compose publishes the container only on host loopback;
+set `COMPOSE_APP_PORT` to choose another host port. The container still listens on
+3000. `PUBLIC_URL`, when explicitly set, overrides the mapped-port origin; update
+it to match your browser URL (and register that origin in PropelAuth).
 Compose explicitly defaults to local development auth. To enable PropelAuth, set
 `AUTH_MODE=propelauth`, `PROPELAUTH_AUTH_URL`, `PROPELAUTH_API_KEY` and `PUBLIC_URL`
-in the Compose environment (or a private Compose `.env`). Route your HTTPS proxy
+in `.env.compose`. Route your HTTPS proxy
 to the loopback-published port and preserve the public Host header.
 The image contains the server, built web assets, fonts and migrations, and runs as
 a non-root user. Compose waits for Postgres to become healthy before starting the
@@ -420,15 +431,15 @@ files are unused and are not migrated.
 Back up the entire database, including assets and comments:
 
 ```sh
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > excalibur.dump
+pnpm --silent compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > excalibur.dump
 ```
 
 Restore into an empty database while the app is stopped with `pg_restore`:
 
 ```sh
-docker compose stop app
-docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < excalibur.dump
-docker compose start app
+pnpm compose stop app
+pnpm compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < excalibur.dump
+pnpm compose start app
 ```
 
 ## Kubernetes / Helm

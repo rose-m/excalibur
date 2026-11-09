@@ -23,7 +23,7 @@ function createWebFixture() {
 test("HTTP lifecycle, conflicts, validation and local-only safeguards", async () => {
   const webDirectory = createWebFixture();
   const repository = await createTestRepository();
-  const app = createApp(new CanvasService(repository), webDirectory, 3000);
+  const app = createApp(new CanvasService(repository), webDirectory, 3000, "http://127.0.0.1:53080");
   const server = createServer(getRequestListener(app.fetch));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -31,6 +31,9 @@ test("HTTP lifecycle, conflicts, validation and local-only safeguards", async ()
   const post = (body: unknown) => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   try {
     assert.equal((await fetch(`${base}/health/ready`)).status, 200);
+    assert.equal((await fetch(`${base}/api/canvases`, {
+      ...post({ title: " " }), headers: { "content-type": "application/json", origin: "http://127.0.0.1:53080" },
+    })).status, 400, "mapped-port browser requests must reach validation rather than fail Origin checks");
     const created = await fetch(`${base}/api/canvases`, post({ title: "HTTP canvas" }));
     assert.equal(created.status, 201);
     const canvas = await created.json() as CanvasDocument;

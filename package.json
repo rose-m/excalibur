@@ -8,8 +8,9 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "compose": "docker compose --env-file .env.compose",
     "dev": "tsx --env-file-if-exists=.env scripts/dev.ts",
-    "dev:server": "AUTH_MODE=${AUTH_MODE:-development} PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:5173} tsx watch src/server/index.ts",
+    "dev:server": "AUTH_MODE=${AUTH_MODE:-development} PUBLIC_URL=${PUBLIC_URL:-http://localhost:5173} tsx watch src/server/index.ts",
     "dev:web": "pnpm assets && vite --port 5173 --strictPort",
     "assets": "node scripts/copy-editor-assets.mjs",
     "build": "pnpm assets && pnpm build:headless && tsc && vite build",

@@ -6,7 +6,7 @@ services:
         condition: service_healthy
     init: true
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${COMPOSE_APP_PORT:-53080}:3000"
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
@@ -16,7 +16,7 @@ services:
       PGUSER: ${PGUSER:-excalibur}
       PGPASSWORD: ${PGPASSWORD:-excalibur}
       AUTH_MODE: ${AUTH_MODE:-development}
-      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:3000}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${COMPOSE_APP_PORT:-53080}}
       PROPELAUTH_AUTH_URL: ${PROPELAUTH_AUTH_URL:-}
       PROPELAUTH_API_KEY: ${PROPELAUTH_API_KEY:-}
       PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID: ${PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID:-}
