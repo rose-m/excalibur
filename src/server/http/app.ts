@@ -83,7 +83,7 @@ export function createApp(service: CanvasService, webDirectory: string, port: nu
     const origin = c.req.header("origin");
     if (!origin) throw new ServiceError(403, "Origin is required");
     const context = c.get("context");
-    await service.get(context, c.req.param("id"));
+    await service.getMetadata(context, c.req.param("id"));
     return c.json(tickets.issue(context, c.req.param("id"), origin), 201);
   });
 

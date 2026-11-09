@@ -30,36 +30,29 @@ export function liveCanvasRoute(service: CanvasService): MiddlewareHandler<HttpE
     if (!c.req.header("origin")) throw new ServiceError(403, "WebSocket Origin is required");
     const context = c.get("context");
     const id = c.req.param("id")!;
-    await service.get(context, id);
-    let unsubscribe = () => {};
-    let unsubscribeComments = () => {};
-    let unsubscribeMetadata = () => {};
-    let unsubscribeDeletion = () => {};
-    let editor: Awaited<ReturnType<CanvasService["connectEditor"]>> | undefined;
+    await service.getMetadata(context, id);
+    let editor: Awaited<ReturnType<CanvasService["openLiveSession"]>> | undefined;
+    const initialization = new AbortController();
     let closed = false;
     let ready: Promise<unknown> = Promise.resolve();
     let messages: Promise<unknown> = Promise.resolve();
     let pendingMessages = 0;
     let pendingBytes = 0;
-    const cleanup = () => { closed = true; unsubscribe(); unsubscribeComments(); unsubscribeMetadata(); unsubscribeDeletion(); editor?.close(); };
+    const cleanup = () => { closed = true; initialization.abort(); editor?.close(); };
     return upgradeWebSocket(() => ({
       onOpen(_event, socket) {
-        ready = service.exclusive(id, async () => {
-          if (closed) return;
-          // Hold the same queue as mutations until subscriptions and the initial
-          // snapshot are installed, so no committed update can fall in a gap.
-          unsubscribe = await service.subscribe(context, id, (update) => send(socket, { type: "update", update }));
-          editor = await service.connectEditor(context, id);
-          unsubscribeComments = await service.comments.subscribe(context, id, state => send(socket, { type: "comments", state }));
-          unsubscribeMetadata = await service.subscribeMetadata(context, id, metadata => send(socket, { type: "metadata", metadata }));
-          unsubscribeDeletion = await service.subscribeDeletion(context, id, () => {
+        ready = service.openLiveSession(context, id, {
+          snapshot: (canvas, comments) => { if (!closed) send(socket, { type: "snapshot", canvas, comments }); },
+          update: update => send(socket, { type: "update", update }),
+          comments: state => send(socket, { type: "comments", state }),
+          metadata: metadata => send(socket, { type: "metadata", metadata }),
+          deleted: () => {
             try { send(socket, { type: "deleted", canvasId: id }); }
             finally { cleanup(); socket.close(1008, "Canvas deleted"); }
-          });
-          const canvas = await service.get(context, id);
-          const comments = await service.comments.get(context, id);
-          if (closed) { cleanup(); return; }
-          send(socket, { type: "snapshot", canvas, comments });
+          },
+        }, initialization.signal).then(session => {
+          editor = session;
+          if (closed) session.close();
         }).catch(() => { cleanup(); socket.close(1008, "Canvas unavailable"); });
       },
       onMessage(event, socket) {

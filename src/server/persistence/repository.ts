@@ -2,6 +2,8 @@ import type { CanvasDocument, CanvasMetadata, Scene } from "../../shared/canvas.
 import type { OperationContext } from "../auth/context.js";
 import type { CanvasComment, CommentState } from "../../shared/comments.js";
 
+export type CanvasScene = CanvasMetadata & { scene: Pick<Scene, "elements" | "sharedSettings"> };
+
 export type SceneCommit = {
   expectedRevision: number;
   scene: Pick<Scene, "elements" | "sharedSettings">;
@@ -12,6 +14,8 @@ export type SceneCommit = {
 export interface CanvasRepository {
   list(context: OperationContext): Promise<CanvasMetadata[]>;
   create(canvas: CanvasDocument): Promise<void>;
+  getMetadata(id: string): Promise<CanvasMetadata | undefined>;
+  getScene(id: string): Promise<CanvasScene | undefined>;
   get(id: string): Promise<CanvasDocument | undefined>;
   // Compare revision, save scene/asset deltas, and advance revision atomically.
   commit(id: string, input: SceneCommit, updatedAt: string): Promise<CanvasMetadata | undefined>;

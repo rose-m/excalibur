@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { CanvasDocument, CanvasMetadata, Scene } from "../../shared/canvas.js";
 import type { OperationContext } from "../auth/context.js";
-import type { CanvasRepository, SceneCommit } from "./repository.js";
+import type { CanvasRepository, CanvasScene, SceneCommit } from "./repository.js";
 import type { CanvasComment, CommentState } from "../../shared/comments.js";
 import { signature } from "../../shared/signature.js";
 
@@ -65,6 +65,19 @@ export class PostgresCanvasRepository implements CanvasRepository {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [canvas.id, canvas.organizationId, canvas.creatorUserId, canvas.title, canvas.visibility,
       canvas.revision, canvas.createdAt, canvas.updatedAt, JSON.stringify(canvas.scene.elements), JSON.stringify(canvas.scene.sharedSettings)]);
+  }
+
+  async getMetadata(id: string): Promise<CanvasMetadata | undefined> {
+    const row = (await this.pool.query(`SELECT ${metadataColumns} FROM canvases WHERE id = $1`, [id])).rows[0];
+    return row ? metadata(row) : undefined;
+  }
+
+  async getScene(id: string): Promise<CanvasScene | undefined> {
+    const row = (await this.pool.query(`SELECT ${metadataColumns}, elements, shared_settings FROM canvases WHERE id = $1`, [id])).rows[0];
+    return row ? { ...metadata(row), scene: {
+      elements: JSON.parse(row.elements) as Scene["elements"],
+      sharedSettings: JSON.parse(row.shared_settings) as Scene["sharedSettings"],
+    } } : undefined;
   }
 
   async get(id: string): Promise<CanvasDocument | undefined> {

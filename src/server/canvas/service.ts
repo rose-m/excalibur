@@ -8,6 +8,24 @@ import type { CanvasRepository } from "../persistence/repository.js";
 import { ServiceError } from "./errors.js";
 import { reconcileElements } from "./reconcile.js";
 import { CommentService } from "./comments.js";
+import type { CommentState } from "../../shared/comments.js";
+import { subscribeTo } from "./subscriptions.js";
+
+type LiveListeners = {
+  snapshot: (canvas: CanvasDocument, comments: CommentState) => void;
+  update: (update: SceneUpdate) => void;
+  comments: (state: CommentState) => void;
+  metadata: (metadata: CanvasMetadata) => void;
+  deleted: () => void;
+};
+
+function authorize<T extends CanvasMetadata>(context: OperationContext, canvas: T | undefined): T {
+  if (!canvas || canvas.organizationId !== context.organizationId
+    || (canvas.visibility === "private" && canvas.creatorUserId !== context.userId)) {
+    throw new ServiceError(404, "Canvas not found");
+  }
+  return canvas;
+}
 
 function validateAssets(scene: Scene) {
   if (Buffer.byteLength(JSON.stringify(scene)) > 24 * 1024 * 1024) {
@@ -42,6 +60,7 @@ export class CanvasService {
   private listeners = new Map<string, Set<(update: SceneUpdate) => void>>();
   private metadataListeners = new Map<string, Set<(metadata: CanvasMetadata) => void>>();
   private deletionListeners = new Map<string, Set<() => void>>();
+  private commentListeners = new Map<string, Set<(state: CommentState) => void>>();
   // Socket-scoped editor state. Never committed, versioned or broadcast as a
   // scene mutation. New connections (including reconnects) get fresh IDs.
   private editors = new Map<string, Map<string, string[]>>();
@@ -57,7 +76,10 @@ export class CanvasService {
   }
 
   constructor(private repository: CanvasRepository) {
-    this.comments = new CommentService(repository, (context, id) => this.get(context, id), (id, run) => this.exclusive(id, run));
+    this.comments = new CommentService(repository, {
+      metadata: (context, id) => this.getMetadata(context, id),
+      scene: (context, id) => this.getScene(context, id),
+    }, (id, run) => this.exclusive(id, run), this.commentListeners);
   }
 
   list(context: OperationContext) { return this.repository.list(context); }
@@ -75,12 +97,40 @@ export class CanvasService {
   }
 
   async get(context: OperationContext, id: string): Promise<CanvasDocument> {
-    const canvas = await this.repository.get(id);
-    if (!canvas || canvas.organizationId !== context.organizationId
-      || (canvas.visibility === "private" && canvas.creatorUserId !== context.userId)) {
-      throw new ServiceError(404, "Canvas not found");
-    }
-    return canvas;
+    return authorize(context, await this.repository.get(id));
+  }
+
+  async getMetadata(context: OperationContext, id: string): Promise<CanvasMetadata> {
+    return authorize(context, await this.repository.getMetadata(id));
+  }
+
+  private async getScene(context: OperationContext, id: string) {
+    return authorize(context, await this.repository.getScene(id));
+  }
+
+  async openLiveSession(context: OperationContext, id: string, listeners: LiveListeners, signal?: AbortSignal) {
+    return this.exclusive(id, async () => {
+      signal?.throwIfAborted();
+      // Authorize once using the snapshot itself. Keep the queue until room
+      // registration and snapshot delivery complete, so no write can land in a gap.
+      const canvas = await this.get(context, id);
+      signal?.throwIfAborted();
+      const comments = await this.repository.getComments(id);
+      signal?.throwIfAborted();
+      const unsubscribe = [
+        subscribeTo(this.listeners, id, listeners.update),
+        subscribeTo(this.metadataListeners, id, listeners.metadata),
+        subscribeTo(this.deletionListeners, id, listeners.deleted),
+        subscribeTo(this.commentListeners, id, listeners.comments),
+      ];
+      const editor = this.registerEditor(context, id);
+      const close = () => { for (const stop of unsubscribe) stop(); editor.close(); };
+      try {
+        listeners.snapshot(canvas, comments);
+        signal?.throwIfAborted();
+        return { setSelection: editor.setSelection, close };
+      } catch (error) { close(); throw error; }
+    });
   }
 
   setVisibility(context: OperationContext, id: string, input: unknown) {
@@ -88,7 +138,7 @@ export class CanvasService {
   }
 
   private async setVisibilityLocked(context: OperationContext, id: string, input: unknown): Promise<CanvasMetadata> {
-    const current = await this.get(context, id);
+    const current = await this.getScene(context, id);
     if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can change sharing");
     const { visibility, expectedVisibility } = changeVisibilitySchema.parse(input);
     if (current.visibility === visibility) {
@@ -107,7 +157,7 @@ export class CanvasService {
   }
 
   private async renameLocked(context: OperationContext, id: string, input: unknown): Promise<CanvasMetadata> {
-    const current = await this.get(context, id);
+    const current = await this.getScene(context, id);
     if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can rename it");
     const { title, expectedTitle } = renameCanvasSchema.parse(input);
     if (current.title === title) {
@@ -126,7 +176,7 @@ export class CanvasService {
   }
 
   private async deleteLocked(context: OperationContext, id: string, input: unknown) {
-    const current = await this.get(context, id);
+    const current = await this.getMetadata(context, id);
     if (current.creatorUserId !== context.userId) throw new ServiceError(403, "Only the canvas creator can delete it");
     const { confirmTitle, expectedRevision } = deleteCanvasSchema.parse(input);
     if (current.title !== confirmTitle || current.revision !== expectedRevision) throw new ServiceError(409, "Canvas changed. Review the latest canvas and confirm deletion again.");
@@ -158,31 +208,13 @@ export class CanvasService {
   }
 
   async subscribeDeletion(context: OperationContext, id: string, listener: () => void): Promise<() => void> {
-    await this.get(context, id);
-    let listeners = this.deletionListeners.get(id);
-    if (!listeners) { listeners = new Set(); this.deletionListeners.set(id, listeners); }
-    listeners.add(listener);
-    let closed = false;
-    return () => {
-      if (closed) return;
-      closed = true;
-      listeners.delete(listener);
-      if (!listeners.size && this.deletionListeners.get(id) === listeners) this.deletionListeners.delete(id);
-    };
+    await this.getMetadata(context, id);
+    return subscribeTo(this.deletionListeners, id, listener);
   }
 
   async subscribeMetadata(context: OperationContext, id: string, listener: (metadata: CanvasMetadata) => void): Promise<() => void> {
-    await this.get(context, id);
-    let listeners = this.metadataListeners.get(id);
-    if (!listeners) { listeners = new Set(); this.metadataListeners.set(id, listeners); }
-    listeners.add(listener);
-    let closed = false;
-    return () => {
-      if (closed) return;
-      closed = true;
-      listeners.delete(listener);
-      if (!listeners.size && this.metadataListeners.get(id) === listeners) this.metadataListeners.delete(id);
-    };
+    await this.getMetadata(context, id);
+    return subscribeTo(this.metadataListeners, id, listener);
   }
 
   save(context: OperationContext, id: string, input: unknown) {
@@ -190,13 +222,12 @@ export class CanvasService {
   }
 
   private async saveLocked(context: OperationContext, id: string, input: unknown) {
-    await this.get(context, id);
+    await this.getMetadata(context, id);
     const parsed = saveSceneSchema.parse(input);
     // Compatibility snapshot-shaped input still reconciles elements; omission
     // never deletes another participant's work. Deletions require tombstones.
     await this.mutateLocked(context, id, { ...parsed.scene, expectedRevision: parsed.expectedRevision });
-    const { scene: _scene, ...metadata } = await this.get(context, id);
-    return metadata;
+    return this.getMetadata(context, id);
   }
 
   mutate(context: OperationContext, id: string, input: unknown, signal?: AbortSignal) {
@@ -257,21 +288,16 @@ export class CanvasService {
   }
 
   async subscribe(context: OperationContext, id: string, listener: (update: SceneUpdate) => void): Promise<() => void> {
-    await this.get(context, id);
-    let listeners = this.listeners.get(id);
-    if (!listeners) { listeners = new Set(); this.listeners.set(id, listeners); }
-    listeners.add(listener);
-    let closed = false;
-    return () => {
-      if (closed) return;
-      closed = true;
-      listeners.delete(listener);
-      if (!listeners.size && this.listeners.get(id) === listeners) this.listeners.delete(id);
-    };
+    await this.getMetadata(context, id);
+    return subscribeTo(this.listeners, id, listener);
   }
 
   async connectEditor(context: OperationContext, id: string) {
-    await this.get(context, id);
+    await this.getMetadata(context, id);
+    return this.registerEditor(context, id);
+  }
+
+  private registerEditor(context: OperationContext, id: string) {
     let editors = this.editors.get(id);
     if (!editors) { editors = new Map(); this.editors.set(id, editors); }
     const editorId = randomUUID();
@@ -280,7 +306,7 @@ export class CanvasService {
     return {
       setSelection: async (input: unknown) => {
         if (closed) return;
-        await this.get(context, id);
+        await this.getMetadata(context, id);
         if (closed) return;
         editors.set(editorId, [...new Set(selectedElementIdsSchema.parse(input))]);
       },
@@ -294,7 +320,7 @@ export class CanvasService {
   }
 
   async getSelectedElements(context: OperationContext, id: string) {
-    const canvas = await this.get(context, id);
+    const canvas = await this.getScene(context, id);
     const active = new Map(canvas.scene.elements.filter(element => !element.isDeleted).map(element => [element.id, element]));
     return {
       revision: canvas.revision,

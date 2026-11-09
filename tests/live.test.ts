@@ -139,12 +139,12 @@ test("async live initialization sends a snapshot before queued scene and comment
   const gate = new Promise<void>(resolve => { release = resolve; });
   let entered!: () => void;
   const subscribing = new Promise<void>(resolve => { entered = resolve; });
-  const subscribe = service.subscribe.bind(service);
-  t.mock.method(service, "subscribe", async (...args: Parameters<CanvasService["subscribe"]>) => {
-    const cleanup = await subscribe(...args);
+  const getComments = repository.getComments.bind(repository);
+  t.mock.method(repository, "getComments", async (id: string) => {
+    const state = await getComments(id);
     entered();
     await gate;
-    return cleanup;
+    return state;
   });
   let client: Inbox | undefined;
   try {
@@ -186,12 +186,12 @@ for (const limit of ["count", "bytes"] as const) {
     const gate = new Promise<void>(resolve => { release = resolve; });
     let entered!: () => void;
     const subscribing = new Promise<void>(resolve => { entered = resolve; });
-    const subscribe = service.subscribe.bind(service);
-    t.mock.method(service, "subscribe", async (...args: Parameters<CanvasService["subscribe"]>) => {
-      const cleanup = await subscribe(...args);
+    const getComments = repository.getComments.bind(repository);
+    t.mock.method(repository, "getComments", async (id: string) => {
+      const state = await getComments(id);
       entered();
       await gate;
-      return cleanup;
+      return state;
     });
     let socket: WebSocket | undefined;
     try {

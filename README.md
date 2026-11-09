@@ -352,6 +352,9 @@ Agents can also retrieve, add, and resolve notes through MCP.
 - Commits write only added or changed image assets, in one batch. Ordinary shape
   and background edits do not issue asset writes; existing bytes are retained for
   native undo. Metadata-only queries do not fetch scene snapshots.
+- Access checks, subscriptions and selection updates read metadata rather than
+  image bytes. Live joins load one full snapshot under the per-canvas queue;
+  listeners are registered before that snapshot is sent, without missing edits.
 - Incremental element/file updates are throttled to 100 ms intervals during active
   drawing, with one mutation awaiting acknowledgment at a time. Final changes are
   sent without requiring another editor callback. Exact scene diffs run at send

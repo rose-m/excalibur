@@ -1,18 +1,21 @@
 import { z } from "zod";
 import { createCommentSchema, editCommentSchema } from "../../shared/comments.js";
 import type { CommentState } from "../../shared/comments.js";
-import type { CanvasDocument } from "../../shared/canvas.js";
+import type { CanvasMetadata } from "../../shared/canvas.js";
 import type { OperationContext } from "../auth/context.js";
-import type { CanvasRepository } from "../persistence/repository.js";
+import type { CanvasRepository, CanvasScene } from "../persistence/repository.js";
 import { ServiceError } from "./errors.js";
+import { subscribeTo } from "./subscriptions.js";
 
 export class CommentService {
-  private listeners = new Map<string, Set<(state: CommentState) => void>>();
-  constructor(private repository: CanvasRepository, private access: (context: OperationContext, id: string) => Promise<CanvasDocument>,
-    private exclusive: <T>(id: string, run: () => Promise<T>) => Promise<T>) {}
+  constructor(private repository: CanvasRepository, private canvases: {
+    metadata: (context: OperationContext, id: string) => Promise<CanvasMetadata>;
+    scene: (context: OperationContext, id: string) => Promise<CanvasScene>;
+  }, private exclusive: <T>(id: string, run: () => Promise<T>) => Promise<T>,
+  private listeners: Map<string, Set<(state: CommentState) => void>>) {}
 
   async get(context: OperationContext, id: string) {
-    await this.access(context, id);
+    await this.canvases.metadata(context, id);
     return this.repository.getComments(id);
   }
 
@@ -21,13 +24,15 @@ export class CommentService {
   }
 
   private async createLocked(context: OperationContext, id: string, input: unknown) {
-    const canvas = await this.access(context, id);
+    await this.canvases.metadata(context, id);
     const comment = createCommentSchema.parse(input);
     const anchor = comment.anchor;
     const before = await this.repository.getComments(id);
-    if (anchor.type === "element" && !before.comments.some(item => item.id === comment.id)
-      && !canvas.scene.elements.some(element => element.id === anchor.elementId && !element.isDeleted)) {
-      throw new ServiceError(409, "The attached element is not saved or no longer exists. Save the drawing or choose another point.");
+    if (anchor.type === "element" && !before.comments.some(item => item.id === comment.id)) {
+      const canvas = await this.canvases.scene(context, id);
+      if (!canvas.scene.elements.some(element => element.id === anchor.elementId && !element.isDeleted)) {
+        throw new ServiceError(409, "The attached element is not saved or no longer exists. Save the drawing or choose another point.");
+      }
     }
     const result = await this.repository.addComment(id, { ...comment, createdAt: new Date().toISOString() });
     if (result === "limit") throw new ServiceError(413, "A canvas can have at most 500 comments. Resolve a comment first.");
@@ -41,7 +46,7 @@ export class CommentService {
   }
 
   private async editLocked(context: OperationContext, id: string, commentId: string, input: unknown) {
-    await this.access(context, id);
+    await this.canvases.metadata(context, id);
     z.uuid().parse(commentId);
     const { text, expectedText } = editCommentSchema.parse(input);
     const before = await this.repository.getComments(id);
@@ -57,7 +62,7 @@ export class CommentService {
   }
 
   private async resolveLocked(context: OperationContext, id: string, commentId: string) {
-    await this.access(context, id);
+    await this.canvases.metadata(context, id);
     z.uuid().parse(commentId);
     const before = await this.repository.getComments(id);
     const result = await this.repository.deleteComment(id, commentId);
@@ -66,17 +71,8 @@ export class CommentService {
   }
 
   async subscribe(context: OperationContext, id: string, listener: (state: CommentState) => void) {
-    await this.access(context, id);
-    let listeners = this.listeners.get(id);
-    if (!listeners) { listeners = new Set(); this.listeners.set(id, listeners); }
-    listeners.add(listener);
-    let closed = false;
-    return () => {
-      if (closed) return;
-      closed = true;
-      listeners.delete(listener);
-      if (!listeners.size && this.listeners.get(id) === listeners) this.listeners.delete(id);
-    };
+    await this.canvases.metadata(context, id);
+    return subscribeTo(this.listeners, id, listener);
   }
 
   private publish(id: string, state: CommentState) {
