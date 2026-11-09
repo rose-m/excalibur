@@ -4,7 +4,14 @@ Persistent Excalidraw for humans and agents: live collaboration, organization
 sharing, pinned comments, and an OAuth-protected MCP drawing toolkit. Postgres
 stores scenes and images; PropelAuth provides identity and organizations.
 
+![An AI agent creating a repository architecture diagram in Excalibur, with the resulting live canvas shown alongside the conversation](docs/images/architecture-demo.png)
+
 [Architecture](docs/high-level-design.md) · [Helm chart](charts/excalibur/README.md)
+
+**Credits:** Excalibur builds on [Excalidraw](https://github.com/excalidraw/excalidraw)
+and uses [MCP Excalidraw Server](https://github.com/yctimlin/mcp_excalidraw) as its
+upstream template and implementation reference for the agent drawing toolkit and
+headless rendering. Thanks to their contributors! See [third-party notices](THIRD_PARTY_NOTICES.md).
 
 Requires Node.js **22.13+**, pnpm **9.1.0**, and Postgres **16+** or Docker Compose.
 

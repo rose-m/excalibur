@@ -207,7 +207,7 @@ Versioned Postgres migrations run transactionally at startup under an advisory l
 
 ## MCP tool direction
 
-Use `/Users/michael.rose/Software/private/mcp_excalidraw` as an implementation reference, especially:
+Use [MCP Excalidraw Server (`yctimlin/mcp_excalidraw`)](https://github.com/yctimlin/mcp_excalidraw) as the upstream template and implementation reference, especially:
 
 - `src/core/mcp-tools.ts`: tool definitions and agent-friendly inputs.
 - `src/core/mcp-server.ts`: protocol registration separated from tool dispatch.
