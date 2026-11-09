@@ -1,0 +1,83 @@
+# Build and push the repository's Dockerfile to your registry before installing.
+image:
+  repository: excalibur
+  tag: "" # Defaults to Chart.appVersion. Use an immutable tag for deployments.
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Must match the browser origin, including https when TLS terminates at Ingress.
+publicUrl: https://excalibur.example.com
+
+# One app replica is intentional: live rooms and events are process-local.
+auth:
+  url: https://auth.example.com
+  # Kubernetes Secret name; empty defaults to <release-fullname>-auth.
+  # Set remoteSecretName to have ESO populate it from AWS.
+  existingSecret: ""
+  remoteSecretName: "" # AWS Secrets Manager name or ARN of a JSON secret.
+  apiKeyKey: api-key
+  mcp:
+    enabled: false
+    clientIdKey: mcp-client-id
+    clientSecretKey: mcp-client-secret
+
+# Optional External Secrets Operator integration. The operator and this store
+# must already exist; the store owns AWS region, IAM/Pod Identity/IRSA setup.
+# No ExternalSecret resources are rendered unless a remoteSecretName is set.
+externalSecrets:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secretsmanager
+    kind: ClusterSecretStore # Or SecretStore in the release namespace.
+
+service:
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # The Ingress host is derived from publicUrl.
+  tls: []
+  # - secretName: excalibur-tls
+  #   hosts:
+  #     - excalibur.example.com
+
+# Shared connection settings for either bundled or external Postgres.
+database:
+  host: "" # Required only when postgresql.enabled=false.
+  port: 5432 # Used only for external Postgres; bundled Postgres uses 5432.
+  name: excalibur
+  user: excalibur
+  existingSecret: "" # Recommended for production; must contain passwordKey.
+  remoteSecretName: "" # Optional AWS JSON secret; ESO reads passwordKey from it.
+  passwordKey: password
+  password: "" # If neither Secret source is set: empty generates a random password.
+
+postgresql:
+  enabled: true
+  image: postgres:17-bookworm
+  persistence:
+    size: 8Gi
+    storageClass: "" # Empty uses the cluster's default StorageClass.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# Kubernetes EnvVar entries, e.g. PGSSLMODE for an external TLS-enabled database.
+# Do not override HOST, PORT, AUTH_MODE, PUBLIC_URL, or the configured PG fields.
+extraEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

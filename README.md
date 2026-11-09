@@ -430,3 +430,13 @@ docker compose stop app
 docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < excalibur.dump
 docker compose start app
 ```
+
+## Kubernetes / Helm
+
+Use [`charts/excalibur`](charts/excalibur/README.md) for a single-replica deployment
+with optional Ingress and persistent bundled Postgres. Set
+`postgresql.enabled=false` and supply `database.host` and an existing credentials
+Secret to use an external database. The chart supports PropelAuth only. Optional
+External Secrets Operator integration lets you provide AWS Secrets Manager names
+instead of manually creating Kubernetes Secrets. See the chart README for setup,
+installation, and values.

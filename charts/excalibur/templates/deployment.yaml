@@ -1,0 +1,152 @@
+{{- if and (hasKey .Values.auth "mode") (ne .Values.auth.mode "propelauth") }}
+{{- fail "The Helm chart supports only PropelAuth authentication" }}
+{{- end }}
+{{- range .Values.extraEnv }}
+{{- if eq .name "AUTH_MODE" }}
+{{- fail "AUTH_MODE is fixed to propelauth and cannot be overridden through extraEnv" }}
+{{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "excalibur.name" . }}
+  labels:
+    {{- include "excalibur.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # No overlapping replicas: rooms and notifications are process-local.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "excalibur.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "excalibur.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ .Values.postgresql.image | quote }}
+          command: ["sh", "-ec"]
+          args:
+            - 'until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE"; do sleep 2; done'
+          env:
+            {{- include "excalibur.databaseEnv" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      containers:
+        - name: excalibur
+          image: {{ printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: "3000"
+            - name: PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: AUTH_MODE
+              value: propelauth
+            {{- include "excalibur.databaseEnv" . | nindent 12 }}
+            - name: PROPELAUTH_AUTH_URL
+              value: {{ .Values.auth.url | quote }}
+            - name: PROPELAUTH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "excalibur.authSecret" . | quote }}
+                  key: {{ .Values.auth.apiKeyKey | quote }}
+            {{- if .Values.auth.mcp.enabled }}
+            - name: PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "excalibur.authSecret" . | quote }}
+                  key: {{ .Values.auth.mcp.clientIdKey | quote }}
+            - name: PROPELAUTH_REQUEST_VALIDATION_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "excalibur.authSecret" . | quote }}
+                  key: {{ .Values.auth.mcp.clientSecretKey | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ include "excalibur.publicHost" . | quote }}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ include "excalibur.publicHost" . | quote }}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ include "excalibur.publicHost" . | quote }}
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

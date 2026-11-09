@@ -1,0 +1,18 @@
+Excalibur runs one application replica. Do not scale it horizontally: live rooms
+and notifications are still process-local.
+
+Configure publicUrl, auth.url, and the {{ include "excalibur.authSecret" . }} Secret
+before using the deployment. Default example domains are placeholders.
+
+{{- if or .Values.auth.remoteSecretName .Values.database.remoteSecretName }}
+
+External Secrets Operator and the {{ .Values.externalSecrets.secretStoreRef.name }}
+{{ .Values.externalSecrets.secretStoreRef.kind }} must already exist and have
+permission to read the configured remote secrets.
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+
+Bundled Postgres is a single instance, not a highly available database. Its PVC
+and chart-managed credentials are retained on uninstall. Back them up together.
+{{- end }}
