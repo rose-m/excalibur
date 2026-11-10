@@ -152,4 +152,13 @@ jobs:
             --values deployment-values.yaml --wait --timeout 10m
           \`\`\`
           EOF
-          gh release create "$TAG" packaged/*.tgz --verify-tag --title "$TAG" --notes-file release-notes.md --generate-notes
+          if gh release view "$TAG" --json assets --jq '.assets[].name' > existing-assets.txt; then
+            # Preserve existing release notes and assets, including on reruns.
+            for archive in packaged/*.tgz; do
+              if ! grep -Fxq -- "${archive##*/}" existing-assets.txt; then
+                gh release upload "$TAG" "$archive"
+              fi
+            done
+          else
+            gh release create "$TAG" packaged/*.tgz --verify-tag --title "$TAG" --notes-file release-notes.md --generate-notes
+          fi
