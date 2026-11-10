@@ -127,3 +127,17 @@ pnpm build
 Tests use `excalibur_test` with local Compose defaults and require schema-creation
 permissions. Export `PG*` variables or `TEST_DATABASE_URL` for custom connections;
 tests do not load `.env` automatically.
+
+## Releases
+
+CI checks every PR and push to `main`. To release, push a new `vMAJOR.MINOR.PATCH` tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+After CI passes, the workflow publishes the amd64/arm64 image and matching Helm
+chart to GHCR, then creates a GitHub release with installation instructions.
+It uses `GITHUB_TOKEN`; no registry secret is needed. Make both GHCR packages
+public after the first release.

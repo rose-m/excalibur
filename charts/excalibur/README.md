@@ -6,13 +6,11 @@ See [values.yaml](values.yaml) for all options.
 
 ## Install
 
-Supply your built image, public origin, and PropelAuth configuration:
+Published releases include a default image matching the chart version. Supply
+your public origin and PropelAuth configuration:
 
 ```yaml
 # deployment-values.yaml
-image:
-  repository: registry.example.com/excalibur
-  tag: YOUR_TAG
 publicUrl: https://draw.example.com
 auth:
   url: https://your-project.propelauthtest.com
@@ -26,10 +24,15 @@ ingress:
 ```
 
 ```sh
-helm upgrade --install excalibur ./charts/excalibur \
+helm upgrade --install excalibur oci://ghcr.io/rose-m/charts/excalibur \
+  --version 0.1.0 \
   --namespace excalibur --create-namespace \
   --values deployment-values.yaml --wait --timeout 10m
 ```
+
+Use an available release version. For a local chart install, replace the OCI URL
+with `./charts/excalibur`, omit `--version`, and set `image.repository` and
+`image.tag` to an image you have built and pushed.
 
 Ingress host derives from `publicUrl`; register that origin in PropelAuth.
 Your proxy must preserve Host, support WebSockets/MCP streaming, and allow

@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      image: ${{ steps.release.outputs.image }}
+    steps:
+      - name: Resolve version and registry paths
+        id: release
+        env:
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Release tags must use vMAJOR.MINOR.PATCH (for example, v0.1.0).' >&2
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    name: Publish multi-platform image
+    needs: [validate, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.validate.outputs.image }}:${{ needs.validate.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Publish Helm chart
+    needs: [validate, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.17.3
+      - run: python -m pip install PyYAML==6.0.2
+      - name: Set published chart's default image
+        env:
+          IMAGE: ${{ needs.validate.outputs.image }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+
+          path = Path('charts/excalibur/values.yaml')
+          values = yaml.safe_load(path.read_text())
+          values['image']['repository'] = os.environ['IMAGE']
+          values['image']['tag'] = ''  # Fall back to the packaged appVersion.
+          path.write_text(yaml.safe_dump(values, sort_keys=False))
+          PY
+      - name: Package and publish
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          helm lint charts/excalibur --strict
+          helm package charts/excalibur --version "$VERSION" --app-version "$VERSION" --destination packaged
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
+          helm push "packaged/excalibur-${VERSION}.tgz" "oci://ghcr.io/${OWNER,,}/charts"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: helm-chart
+          path: packaged/*.tgz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: [validate, chart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: helm-chart
+          path: packaged
+      - name: Publish release notes and chart archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          IMAGE: ${{ needs.validate.outputs.image }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## Published artifacts
+
+          - Docker image (linux/amd64 and linux/arm64): \`${IMAGE}:${VERSION}\`
+          - Helm chart: \`oci://ghcr.io/${OWNER,,}/charts/excalibur\`, version \`${VERSION}\`
+
+          Configure your public URL, PropelAuth secret and ingress in deployment-values.yaml; see the [chart documentation](https://github.com/${GH_REPO}/blob/${TAG}/charts/excalibur/README.md).
+
+          \`\`\`sh
+          helm upgrade --install excalibur oci://ghcr.io/${OWNER,,}/charts/excalibur \\
+            --version ${VERSION} --namespace excalibur --create-namespace \\
+            --values deployment-values.yaml --wait --timeout 10m
+          \`\`\`
+          EOF
+          gh release create "$TAG" packaged/*.tgz --verify-tag --title "$TAG" --notes-file release-notes.md --generate-notes
