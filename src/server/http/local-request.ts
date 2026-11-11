@@ -2,10 +2,11 @@ import { createMiddleware } from "hono/factory";
 import { ServiceError } from "../canvas/errors.js";
 import type { HttpEnv } from "./types.js";
 import { isLocalAddress, localAddresses } from "../local-network.js";
+import { applicationOrigin } from "./origins.js";
 
 const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function localRequestPolicy(port: number, allowLocal = false, addresses = localAddresses(), publicUrl?: string) {
+export function localRequestPolicy(port: number, allowLocal = false, addresses = localAddresses(), publicUrl?: string, allowedOrigins: readonly string[] = []) {
   const hosts = new Set(localHosts);
   if (allowLocal) for (const address of addresses) if (isLocalAddress(address)) hosts.add(address);
   const origins = new Set([...hosts].flatMap(host => [`http://${host}:${port}`, `http://${host}:5173`]));
@@ -14,7 +15,13 @@ export function localRequestPolicy(port: number, allowLocal = false, addresses =
     const url = new URL(publicUrl);
     if (hosts.has(url.hostname) && ["http:", "https:"].includes(url.protocol)) origins.add(url.origin);
   }
-  return { hosts, origins };
+  const allowedHosts = new Set<string>();
+  for (const value of allowedOrigins) {
+    const origin = applicationOrigin(value, "ALLOWED_ORIGINS");
+    origins.add(origin);
+    allowedHosts.add(new URL(origin).host);
+  }
+  return { hosts, origins, allowedHosts };
 }
 
 export function localRequestsOnly(port: number, policy = localRequestPolicy(port)) {
@@ -25,7 +32,7 @@ export function localRequestsOnly(port: number, policy = localRequestPolicy(port
     let host: URL;
     try { host = new URL(`http://${c.req.header("host") ?? "invalid"}`); }
     catch { throw new ServiceError(403, "Invalid request host"); }
-    if (!policy.hosts.has(host.hostname) || host.username || host.password || host.pathname !== "/" || host.search || host.hash) throw new ServiceError(403, "Local development hosts only");
+    if ((!policy.hosts.has(host.hostname) && !policy.allowedHosts.has(c.req.header("host") ?? "")) || host.username || host.password || host.pathname !== "/" || host.search || host.hash) throw new ServiceError(403, "Host not allowed");
     const origin = c.req.header("origin");
     if (origin && !policy.origins.has(origin)) {
       throw new ServiceError(403, "Origin not allowed");

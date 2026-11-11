@@ -41,6 +41,31 @@ Your proxy must preserve Host, support WebSockets/MCP streaming, and allow
 For MCP, enable `auth.mcp.enabled` and add `mcp-client-id` and `mcp-client-secret`
 to the auth Secret. Configure PropelAuth's `canvases:access` organization scope.
 
+## IPv6 and dual-stack
+
+The app binds to `::` by default, accepting IPv6 and IPv4 on Linux dual-stack
+pods. Set `service.host: 0.0.0.0` if you need an IPv4-only listener. Service
+IP-family fields are omitted by default, letting the cluster choose its default.
+Bundled Postgres already listens on both address families.
+
+For an IPv6-only deployment:
+
+```yaml
+service:
+  ipFamilyPolicy: SingleStack
+  ipFamilies: [IPv6]
+postgresql:
+  service:
+    ipFamilyPolicy: SingleStack
+    ipFamilies: [IPv6]
+```
+
+For dual-stack, set both Services to `ipFamilyPolicy: PreferDualStack` and
+`ipFamilies: [IPv6, IPv4]` (or reverse the order for IPv4-primary). Use
+`RequireDualStack` to require both families. The cluster and CNI must support the
+requested families; Ingress IPv6 exposure is configured in your Ingress controller.
+Changing an existing Service's primary IP family may require recreating it.
+
 ## External Postgres
 
 ```yaml

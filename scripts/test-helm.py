@@ -46,6 +46,10 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(deployment["metadata"]["name"], "excalibur")
         container = app(documents)["containers"][0]
         env = environment(container)
+        self.assertEqual(env["HOST"]["value"], "::")
+        for service in [doc for doc in documents if doc["kind"] == "Service"]:
+            self.assertNotIn("ipFamilyPolicy", service["spec"])
+            self.assertNotIn("ipFamilies", service["spec"])
         self.assertEqual(env["AUTH_MODE"]["value"], "propelauth")
         self.assertEqual(env["PGHOST"]["value"], "excalibur-postgresql")
         self.assertNotIn("PROPELAUTH_REQUEST_VALIDATION_CLIENT_ID", env)
@@ -58,6 +62,49 @@ class ChartTests(unittest.TestCase):
         secret = resource(documents, "Secret")
         self.assertEqual(secret["metadata"]["annotations"]["helm.sh/resource-policy"], "keep")
         self.assertEqual(env["PGPASSWORD"]["valueFrom"]["secretKeyRef"]["name"], secret["metadata"]["name"])
+
+    def test_service_ip_families(self):
+        for policy, families in [
+            ("SingleStack", ["IPv6"]),
+            ("SingleStack", ["IPv4"]),
+            ("PreferDualStack", ["IPv6", "IPv4"]),
+            ("RequireDualStack", ["IPv4", "IPv6"]),
+        ]:
+            with self.subTest(policy=policy, families=families):
+                settings = []
+                for prefix in ["service", "postgresql.service"]:
+                    settings.append(f"{prefix}.ipFamilyPolicy={policy}")
+                    settings.extend(f"{prefix}.ipFamilies[{i}]={family}" for i, family in enumerate(families))
+                documents = render(*settings)
+                services = [doc for doc in documents if doc["kind"] == "Service"]
+                self.assertEqual(len(services), 2)
+                for service in services:
+                    self.assertEqual(service["spec"]["ipFamilyPolicy"], policy)
+                    self.assertEqual(service["spec"]["ipFamilies"], families)
+                database_service = next(service for service in services if service["metadata"]["name"].endswith("-postgresql"))
+                self.assertEqual(database_service["spec"]["clusterIP"], "None")
+
+    def test_service_ip_families_are_independent(self):
+        documents = render("service.ipFamilyPolicy=SingleStack", "service.ipFamilies[0]=IPv6")
+        for service in [doc for doc in documents if doc["kind"] == "Service"]:
+            if service["metadata"]["name"].endswith("-postgresql"):
+                self.assertNotIn("ipFamilyPolicy", service["spec"])
+                self.assertNotIn("ipFamilies", service["spec"])
+            else:
+                self.assertEqual(service["spec"]["ipFamilyPolicy"], "SingleStack")
+                self.assertEqual(service["spec"]["ipFamilies"], ["IPv6"])
+
+    def test_ipv4_listener(self):
+        documents = render("service.host=0.0.0.0")
+        self.assertEqual(environment(app(documents)["containers"][0])["HOST"]["value"], "0.0.0.0")
+
+    def test_external_ipv6_database(self):
+        documents = render("postgresql.enabled=false", "database.host=2001:db8::10", "database.existingSecret=external-db", "service.ipFamilyPolicy=SingleStack", "service.ipFamilies[0]=IPv6")
+        for container in [app(documents)["containers"][0], app(documents)["initContainers"][0]]:
+            self.assertEqual(environment(container)["PGHOST"]["value"], "2001:db8::10")
+        services = [doc for doc in documents if doc["kind"] == "Service"]
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0]["spec"]["ipFamilies"], ["IPv6"])
 
     def test_external_database(self):
         documents = render("postgresql.enabled=false", "database.host=db.internal", "database.port=6543", "database.existingSecret=external-db", "database.passwordKey=db-password")

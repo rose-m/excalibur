@@ -31,6 +31,25 @@ Database contents persist in the `postgres-data` volume.
 `pnpm compose` explicitly loads `.env.compose`; plain `docker compose` loads
 `.env` instead. Both local env files are git-ignored and excluded from image builds.
 
+### Localhost and an ngrok tunnel
+
+Run `ngrok http 53080`, then set these in `.env.compose` using its HTTPS URL:
+
+```dotenv
+PUBLIC_URL=https://your-url.ngrok-free.app
+ALLOWED_ORIGINS=http://localhost:53080,https://your-url.ngrok-free.app
+```
+
+Rebuild/recreate the app with `pnpm compose up -d --build app`. Both browser
+addresses work; Docker can stay bound to localhost. `ALLOWED_ORIGINS` is an
+explicit, comma-separated list of HTTP(S) origins, not wildcards or URL paths.
+It does not enable CORS or change the listening address. `PUBLIC_URL` remains
+canonical for generated links and MCP OAuth discovery/token audiences.
+
+**The allowlist is not authentication.** Configure PropelAuth or protect the
+tunnel with ngrok access controls before exposing development mode. Without
+authentication, everyone admitted through the tunnel shares full development access.
+
 ## Development
 
 For hot reload, run Postgres in Compose and the app locally:
@@ -63,10 +82,11 @@ PROPELAUTH_AUTH_URL=https://your-project.propelauthtest.com
 PROPELAUTH_API_KEY=your-server-side-api-key
 ```
 
-Register the exact `PUBLIC_URL` origin in PropelAuth and add users to organizations.
-**Browser and MCP URLs must use the same hostname and port**—do not interchange
-`localhost` and `127.0.0.1`. Outside local development, authentication defaults to
-PropelAuth and missing credentials fail startup.
+Register `PUBLIC_URL` and any additional browser origins from `ALLOWED_ORIGINS`
+in PropelAuth and add users to organizations. Origins are exact: `localhost` and
+`127.0.0.1` are not interchangeable. Use `PUBLIC_URL` for MCP OAuth clients.
+Outside local development, authentication defaults to PropelAuth and missing
+credentials fail startup.
 
 Canvases start private. Creators can share them with their organization, rename
 them, or permanently delete them. Links alone never grant access.
