@@ -15,7 +15,7 @@ const mcpAuthentication = authentication && config.mcpClientId && config.mcpClie
   authUrl: authentication.authUrl, resource: `${config.publicUrl}/mcp`,
   clientId: config.mcpClientId, clientSecret: config.mcpClientSecret, getPrincipal: authentication.getPrincipal,
 }) : undefined;
-const app = createApp(service, config.webDirectory, config.port, config.publicUrl, { allowLocal: config.allowLocal }, authentication, mcpAuthentication);
+const app = createApp(service, config.webDirectory, config.port, config.publicUrl, { allowLocal: config.allowLocal, allowedOrigins: config.allowedOrigins }, authentication, mcpAuthentication);
 const liveServer = createLiveServer();
 const server = serve({
   fetch: app.fetch,

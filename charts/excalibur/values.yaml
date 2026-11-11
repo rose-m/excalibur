@@ -32,6 +32,11 @@ externalSecrets:
 
 service:
   port: 80
+  # IPv6 wildcard also accepts IPv4 on Linux dual-stack pods.
+  host: "::" # Use 0.0.0.0 to bind only IPv4.
+  # Empty leaves IP-family selection to the cluster.
+  ipFamilyPolicy: "" # SingleStack, PreferDualStack, or RequireDualStack.
+  ipFamilies: [] # e.g. [IPv6] or [IPv6, IPv4].
 
 ingress:
   enabled: false
@@ -57,6 +62,9 @@ database:
 postgresql:
   enabled: true
   image: postgres:17-bookworm
+  service:
+    ipFamilyPolicy: ""
+    ipFamilies: []
   persistence:
     size: 8Gi
     storageClass: "" # Empty uses the cluster's default StorageClass.

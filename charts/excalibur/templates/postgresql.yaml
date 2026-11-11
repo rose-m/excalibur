@@ -7,6 +7,13 @@ metadata:
     {{- include "excalibur.labels" . | nindent 4 }}
 spec:
   clusterIP: None
+  {{- with .Values.postgresql.service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.postgresql.service.ipFamilies }}
+  ipFamilies:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ports:
     - name: postgres
       port: 5432
